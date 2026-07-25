@@ -37,10 +37,24 @@ import Testing
     #expect(Launcher.steamCompatibilityArguments.contains("-cef-disable-gpu"))
     #expect(Launcher.steamCompatibilityArguments.contains("-cef-disable-gpu-compositing"))
     #expect(Launcher.steamCompatibilityArguments.contains("-no-cef-sandbox"))
+    #expect(Launcher.steamCompatibilityArguments.contains("-cef-force-opaque-backgrounds"))
 }
 
 @Test func steamInstallerUsesSilentMode() {
     #expect(Launcher.silentInstallerArguments == ["/S"])
+}
+
+@Test func steamRepairClearsPerUserWebCache() throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let cache = root.appending(path: "drive_c/users/test/AppData/Local/Steam/htmlcache")
+    try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+    try Data("cached".utf8).write(to: cache.appending(path: "data.bin"))
+    let bottle = Bottle(name: "Test", path: root.path, engine: .steamBridge)
+
+    Launcher.clearSteamWebCaches(in: bottle)
+
+    #expect(!FileManager.default.fileExists(atPath: cache.path))
 }
 
 @Test @MainActor func bottleStorePersists() throws {

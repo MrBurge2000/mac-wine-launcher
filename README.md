@@ -58,7 +58,8 @@ The free runtime uses Wine's available WineD3D/Vulkan path. It will not match ev
 commercial CrossOver optimization, and some DirectX 12 titles will still fail.
 
 The Windows Steam installer runs silently, then Steam launches with CEF GPU rendering
-disabled so the sign-in interface remains visible under Wine.
+disabled and opaque browser backgrounds so the sign-in interface remains visible under
+Wine. The repair action also clears Steam's real per-user web cache before relaunching.
 
 ## Privacy and safety
 

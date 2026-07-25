@@ -7,7 +7,9 @@ enum Launcher {
         "-no-cef-sandbox",
         "-cef-disable-gpu",
         "-cef-disable-gpu-compositing",
-        "-cef-disable-gpu-sandbox"
+        "-cef-disable-gpu-sandbox",
+        "-cef-disable-occlusion",
+        "-cef-force-opaque-backgrounds"
     ]
     static let silentInstallerArguments = ["/S"]
 
@@ -61,10 +63,32 @@ enum Launcher {
             return
         }
         try stopBottleProcesses(in: bottle, using: engine)
-        let cacheURL = URL(fileURLWithPath: bottle.path)
-            .appending(path: "drive_c/Program Files (x86)/Steam/config/htmlcache")
-        try? FileManager.default.removeItem(at: cacheURL)
+        clearSteamWebCaches(in: bottle)
         try launchSteam(in: bottle, using: engine)
+    }
+
+    static func clearSteamWebCaches(in bottle: Bottle) {
+        let prefixURL = URL(fileURLWithPath: bottle.path, isDirectory: true)
+        let usersURL = prefixURL.appending(path: "drive_c/users", directoryHint: .isDirectory)
+        if let users = try? FileManager.default.contentsOfDirectory(
+            at: usersURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) {
+            for userURL in users {
+                let cacheURL = userURL.appending(
+                    path: "AppData/Local/Steam/htmlcache",
+                    directoryHint: .isDirectory
+                )
+                try? FileManager.default.removeItem(at: cacheURL)
+            }
+        }
+
+        let legacyCacheURL = prefixURL.appending(
+            path: "drive_c/Program Files (x86)/Steam/config/htmlcache",
+            directoryHint: .isDirectory
+        )
+        try? FileManager.default.removeItem(at: legacyCacheURL)
     }
 
     private static func openEngineApp(for engine: Engine) throws {

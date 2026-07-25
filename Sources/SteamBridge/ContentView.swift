@@ -301,11 +301,15 @@ private struct BottleDetail: View {
 
     private func repairSteam() {
         guard let engine else { return }
-        do {
-            try Launcher.repairAndLaunchSteam(in: bottle, using: engine)
-            report("Steam was relaunched with GPU rendering disabled for its interface.")
-        } catch {
-            report(error.localizedDescription)
+        isWorking = true
+        Task {
+            do {
+                try Launcher.repairAndLaunchSteam(in: bottle, using: engine)
+                report("Steam was relaunched with an opaque, software-rendered interface.")
+            } catch {
+                report(error.localizedDescription)
+            }
+            isWorking = false
         }
     }
 
