@@ -25,7 +25,16 @@ enum EngineDiscovery {
                 return nil
             }
             return Engine(kind: kind, executableURL: URL(fileURLWithPath: path))
-        }.sorted { $0.kind.preferenceRank < $1.kind.preferenceRank }
+        }.sorted { left, right in
+            if left.kind.preferenceRank != right.kind.preferenceRank {
+                return left.kind.preferenceRank < right.kind.preferenceRank
+            }
+            if left.kind == .steamBridge {
+                return runtimePreference(for: left.executableURL.path) <
+                    runtimePreference(for: right.executableURL.path)
+            }
+            return left.executableURL.path < right.executableURL.path
+        }
     }
 
     static func managedRuntimeRoot(fileManager: FileManager = .default) -> URL {
@@ -53,8 +62,14 @@ enum EngineDiscovery {
         }
     }
 
-    private static func runtimePreference(for path: String) -> Int {
-        let stagingPenalty = path.localizedCaseInsensitiveContains("staging") ? 0 : 10
+    static func runtimePreference(for path: String) -> Int {
+        if path.localizedCaseInsensitiveContains("/Sikarugir/wswine.bundle/bin/wine") {
+            return 0
+        }
+        if path.localizedCaseInsensitiveContains("Sikarugir") {
+            return 5
+        }
+        let stagingPenalty = path.localizedCaseInsensitiveContains("staging") ? 20 : 30
         let architecturePenalty = path.hasSuffix("/wine64") ? 0 : 1
         return stagingPenalty + architecturePenalty
     }

@@ -17,27 +17,35 @@ import Testing
     #expect(kinds.first == .steamBridge)
 }
 
-@Test func stagingRuntimeAssetIsPreferredForGaming() {
-    let staging = RuntimeInstaller.Asset(
-        name: "wine-staging-11.10-osx64.tar.xz",
-        browserDownloadURL: URL(string: "https://example.com/staging")!
-    )
-    let stable = RuntimeInstaller.Asset(
-        name: "wine-stable-11.0-osx64.tar.xz",
-        browserDownloadURL: URL(string: "https://example.com/stable")!
-    )
-    let selected = RuntimeInstaller.preferredAsset(in: [
-        .init(assets: [staging]),
-        .init(assets: [stable])
-    ])
-    #expect(selected == staging)
+@Test func currentSikarugirRuntimeIsPinnedAndChecksummed() {
+    #expect(RuntimeInstaller.engineAsset.name == "WS12WineSikarugir10.0_6.tar.xz")
+    #expect(RuntimeInstaller.engineAsset.sha256.count == 64)
+    #expect(RuntimeInstaller.supportAsset.name == "Template-1.0.11.tar.xz")
+    #expect(RuntimeInstaller.supportAsset.sha256.count == 64)
 }
 
-@Test func steamLaunchDisablesProblematicCEFGPUPaths() {
-    #expect(Launcher.steamCompatibilityArguments.contains("-cef-disable-gpu"))
-    #expect(Launcher.steamCompatibilityArguments.contains("-cef-disable-gpu-compositing"))
-    #expect(Launcher.steamCompatibilityArguments.contains("-no-cef-sandbox"))
-    #expect(Launcher.steamCompatibilityArguments.contains("-cef-force-opaque-backgrounds"))
+@Test func currentRuntimeIsPreferredOverLegacyStaging() {
+    let current = "/Runtime/Sikarugir/wswine.bundle/bin/wine"
+    let legacy = "/Runtime/Wine Staging.app/Contents/Resources/wine/bin/wine64"
+    #expect(EngineDiscovery.runtimePreference(for: current) <
+        EngineDiscovery.runtimePreference(for: legacy))
+}
+
+@Test func sikarugirSteamLaunchUsesNativeEngineFixes() {
+    let current = Engine(
+        kind: .steamBridge,
+        executableURL: URL(fileURLWithPath: "/Runtime/Sikarugir/wswine.bundle/bin/wine")
+    )
+    #expect(Launcher.steamArguments(for: current).isEmpty)
+}
+
+@Test func legacyWineKeepsCompatibilityFlags() {
+    let legacy = Engine(
+        kind: .wine,
+        executableURL: URL(fileURLWithPath: "/usr/local/bin/wine")
+    )
+    #expect(Launcher.steamArguments(for: legacy).contains("-cef-disable-gpu"))
+    #expect(Launcher.steamArguments(for: legacy).contains("-cef-force-opaque-backgrounds"))
 }
 
 @Test func steamInstallerUsesSilentMode() {

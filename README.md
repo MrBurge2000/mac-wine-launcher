@@ -48,18 +48,21 @@ open ./dist/SteamBridge.dmg
 The local build is ad-hoc signed. Public distribution without Gatekeeper warnings
 requires an Apple Developer ID Application certificate and Apple notarization.
 
-SteamBridge Wine is the default and costs nothing. The app retrieves a current Wine
-Staging package from the open-source `Gcenx/macOS_Wine_builds` release feed and stores
-the selected runtime under its own Application Support directory. Wine Staging is
-preferred because Windows Steam needs newer compatibility patches. CrossOver and system
-Wine installations remain supported, while Whisky is detected only for existing users.
+SteamBridge Wine is the default and costs nothing. The app installs the current
+Sikarugir Wine 10 gaming engine and its matching open-source macOS support libraries
+from the official `Sikarugir-App/Engines` and `Sikarugir-App/Wrapper` releases. Both
+downloads are pinned to trusted SHA-256 checksums and stored under SteamBridge's own
+Application Support directory. CrossOver and system Wine installations remain
+supported, while Whisky is detected only for existing users.
 
 The free runtime uses Wine's available WineD3D/Vulkan path. It will not match every
 commercial CrossOver optimization, and some DirectX 12 titles will still fail.
 
-The Windows Steam installer runs silently, then Steam launches with CEF GPU rendering
-disabled and opaque browser backgrounds so the sign-in interface remains visible under
-Wine. The repair action also clears Steam's real per-user web cache before relaunching.
+The managed runtime contains Steam-specific CEF and macOS windowing fixes. A normal
+**Launch Steam** automatically upgrades legacy SteamBridge runtimes when needed, stops
+stale Wine processes, clears Steam's real per-user web cache, and launches through the
+tested Wine 10 environment. The manual black-window repair action remains available,
+but it is not required for the normal path.
 
 ## Privacy and safety
 

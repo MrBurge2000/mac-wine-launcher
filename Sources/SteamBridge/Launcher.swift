@@ -3,6 +3,8 @@ import Foundation
 
 enum Launcher {
     static let steamInstallerURL = URL(string: "https://cdn.akamai.steamstatic.com/client/installer/SteamSetup.exe")!
+    // Retained for advanced/legacy Wine installs. The managed Sikarugir runtime
+    // carries its own Steam-specific CEF fixes and must launch without these flags.
     static let steamCompatibilityArguments = [
         "-no-cef-sandbox",
         "-cef-disable-gpu",
@@ -54,7 +56,10 @@ enum Launcher {
             throw LaunchError.steamMissing
         }
         try stopBottleProcesses(in: bottle, using: engine)
-        try run(engine: engine, bottle: bottle, arguments: [steamPath] + steamCompatibilityArguments)
+        if isSikarugir(engine) {
+            clearSteamWebCaches(in: bottle)
+        }
+        try run(engine: engine, bottle: bottle, arguments: [steamPath] + steamArguments(for: engine))
     }
 
     static func repairAndLaunchSteam(in bottle: Bottle, using engine: Engine) throws {
@@ -129,11 +134,60 @@ enum Launcher {
         let process = Process()
         process.executableURL = engine.executableURL
         process.arguments = arguments
+        process.environment = configuredEnvironment(engine: engine, bottle: bottle)
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        return process
+    }
+
+    static func steamArguments(for engine: Engine) -> [String] {
+        isSikarugir(engine) ? [] : steamCompatibilityArguments
+    }
+
+    static func isSikarugir(_ engine: Engine) -> Bool {
+        engine.kind == .steamBridge &&
+            engine.executableURL.path.localizedCaseInsensitiveContains("Sikarugir")
+    }
+
+    private static func configuredEnvironment(engine: Engine, bottle: Bottle) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
         environment["WINEPREFIX"] = bottle.path
         environment["WINEDEBUG"] = "-all"
-        process.environment = environment
-        return process
+
+        guard isSikarugir(engine) else { return environment }
+
+        let bin = engine.executableURL.deletingLastPathComponent()
+        let bundle = bin.deletingLastPathComponent()
+        let runtime = bundle.deletingLastPathComponent()
+        let wineLibrary = bundle.appending(path: "lib/wine", directoryHint: .isDirectory)
+        let libraryPaths = [
+            runtime.appending(path: "Frameworks", directoryHint: .isDirectory).path,
+            runtime.path,
+            bundle.appending(path: "lib", directoryHint: .isDirectory).path
+        ]
+        let dllPaths = [
+            wineLibrary.appending(path: "x86_64-unix", directoryHint: .isDirectory).path,
+            wineLibrary.appending(path: "x86_64-windows", directoryHint: .isDirectory).path,
+            wineLibrary.appending(path: "i386-windows", directoryHint: .isDirectory).path
+        ]
+
+        environment["WINEESYNC"] = "1"
+        environment["WINEMSYNC"] = "1"
+        environment["PATH"] = joinedPath(bin.path, existing: environment["PATH"])
+        environment["DYLD_FALLBACK_LIBRARY_PATH"] = joinedPath(
+            libraryPaths.joined(separator: ":"),
+            existing: environment["DYLD_FALLBACK_LIBRARY_PATH"]
+        )
+        environment["WINEDLLPATH"] = joinedPath(
+            dllPaths.joined(separator: ":"),
+            existing: environment["WINEDLLPATH"]
+        )
+        return environment
+    }
+
+    private static func joinedPath(_ prefix: String, existing: String?) -> String {
+        guard let existing, !existing.isEmpty else { return prefix }
+        return prefix + ":" + existing
     }
 
     static func stopBottleProcesses(in bottle: Bottle, using engine: Engine) throws {
@@ -144,9 +198,9 @@ enum Launcher {
         let process = Process()
         process.executableURL = wineserver
         process.arguments = ["-k"]
-        var environment = ProcessInfo.processInfo.environment
-        environment["WINEPREFIX"] = bottle.path
-        process.environment = environment
+        process.environment = configuredEnvironment(engine: engine, bottle: bottle)
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
         try process.run()
         process.waitUntilExit()
     }

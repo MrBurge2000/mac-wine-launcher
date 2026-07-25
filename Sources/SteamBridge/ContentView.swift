@@ -28,7 +28,7 @@ struct ContentView: View {
                 ContentUnavailableView {
                     Label("Free Runtime Needed", systemImage: "shippingbox.and.arrow.backward")
                 } description: {
-                    Text("Install SteamBridge Wine, a free runtime based on the open-source Wine project. The current download is about 177 MB and usually takes 2–8 minutes.")
+                    Text("Install the free Sikarugir Wine gaming runtime. The two-part download is about 250 MB and usually takes 2–8 minutes.")
                 } actions: {
                     if let runtimeProgress {
                         VStack(spacing: 6) {
@@ -194,8 +194,13 @@ private struct BottleDetail: View {
                     Label("Commercial engine", systemImage: "checkmark.seal.fill")
                         .foregroundStyle(.green)
                 } else if engine?.kind == .steamBridge {
-                    Label("Free built-in runtime", systemImage: "checkmark.seal.fill")
-                        .foregroundStyle(.green)
+                    if let engine, RuntimeInstaller.isCurrentRuntime(engine) {
+                        Label("Current free gaming runtime", systemImage: "checkmark.seal.fill")
+                            .foregroundStyle(.green)
+                    } else {
+                        Label("Upgrade installs automatically before Steam launches", systemImage: "arrow.down.circle.fill")
+                            .foregroundStyle(.orange)
+                    }
                     Button("Update Gaming Runtime") { updateRuntime() }
                         .disabled(isWorking)
                 }
@@ -273,12 +278,13 @@ private struct BottleDetail: View {
     }
 
     private func install() {
-        guard let engine else { return }
+        guard engine != nil else { return }
         isWorking = true
         Task {
             do {
-                try await Launcher.installSteam(in: bottle, using: engine)
-                if engine.kind == .crossover {
+                let readyEngine = try await prepareEngine()
+                try await Launcher.installSteam(in: bottle, using: readyEngine)
+                if readyEngine.kind == .crossover {
                     report("CrossOver opened. Select Steam, click Install, and let its supported recipe configure the bottle.")
                 } else {
                     report("Steam installed successfully and is updating toward the sign-in page.")
@@ -286,29 +292,38 @@ private struct BottleDetail: View {
             } catch {
                 report(error.localizedDescription)
             }
+            runtimeProgress = nil
             isWorking = false
         }
     }
 
     private func launch() {
-        guard let engine else { return }
-        do {
-            try Launcher.launchSteam(in: bottle, using: engine)
-        } catch {
-            report(error.localizedDescription)
+        guard engine != nil else { return }
+        isWorking = true
+        Task {
+            do {
+                let readyEngine = try await prepareEngine()
+                try Launcher.launchSteam(in: bottle, using: readyEngine)
+            } catch {
+                report(error.localizedDescription)
+            }
+            runtimeProgress = nil
+            isWorking = false
         }
     }
 
     private func repairSteam() {
-        guard let engine else { return }
+        guard engine != nil else { return }
         isWorking = true
         Task {
             do {
-                try Launcher.repairAndLaunchSteam(in: bottle, using: engine)
-                report("Steam was relaunched with an opaque, software-rendered interface.")
+                let readyEngine = try await prepareEngine()
+                try Launcher.repairAndLaunchSteam(in: bottle, using: readyEngine)
+                report("Steam’s web cache was rebuilt and Steam was relaunched.")
             } catch {
                 report(error.localizedDescription)
             }
+            runtimeProgress = nil
             isWorking = false
         }
     }
@@ -319,7 +334,7 @@ private struct BottleDetail: View {
             do {
                 try await RuntimeInstaller.install { runtimeProgress = $0 }
                 refreshEngines()
-                report("The gaming runtime was updated. Use Fix Black Steam Window to relaunch Steam.")
+                report("The gaming runtime was updated. Launch Steam normally.")
             } catch {
                 report(error.localizedDescription)
             }
@@ -339,5 +354,23 @@ private struct BottleDetail: View {
             }
             isUninstalling = false
         }
+    }
+
+    private func prepareEngine() async throws -> Engine {
+        guard let engine else {
+            throw RuntimeInstaller.InstallError.runtimeNotFound
+        }
+        guard engine.kind == .steamBridge, !RuntimeInstaller.isCurrentRuntime(engine) else {
+            return engine
+        }
+
+        try await RuntimeInstaller.install { runtimeProgress = $0 }
+        refreshEngines()
+        guard let updated = EngineDiscovery.discover().first(where: {
+            $0.kind == .steamBridge && RuntimeInstaller.isCurrentRuntime($0)
+        }) else {
+            throw RuntimeInstaller.InstallError.runtimeNotFound
+        }
+        return updated
     }
 }
