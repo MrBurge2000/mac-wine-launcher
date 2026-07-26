@@ -118,6 +118,21 @@ import Testing
     #expect(environment["CX_APPLEGPTK_LIBD3DSHARED_PATH"] == shared.path)
 }
 
+@Test func retinaDisplayProfileWritesWineRegistrySettings() {
+    let commands = Launcher.displayRegistryArguments(for: .retinaRecommended)
+    #expect(commands.count == 2)
+    #expect(commands[0].contains("RetinaMode"))
+    #expect(commands[0].contains("Y"))
+    #expect(commands[1].contains("LogPixels"))
+    #expect(commands[1].contains("192"))
+}
+
+@Test func standardDisplayProfileDisablesRetina() {
+    let commands = Launcher.displayRegistryArguments(for: .standard)
+    #expect(commands[0].contains("N"))
+    #expect(commands[1].contains("96"))
+}
+
 @Test func steamInstallationDetectionRequiresExecutable() throws {
     let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }

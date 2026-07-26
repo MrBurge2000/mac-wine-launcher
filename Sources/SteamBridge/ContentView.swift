@@ -187,6 +187,7 @@ private struct BottleDetail: View {
     @State private var steamProgress: Launcher.SteamInstallProgress?
     @State private var operationStatus: String?
     @State private var graphicsBackend: GraphicsBackend = .automatic
+    @State private var displayProfile: DisplayProfile = .retinaRecommended
 
     var body: some View {
         Form {
@@ -305,6 +306,31 @@ private struct BottleDetail: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Display & Resolution") {
+                Picker("Display quality", selection: $displayProfile) {
+                    ForEach(DisplayProfile.allCases) { profile in
+                        Text(profile.title).tag(profile)
+                    }
+                }
+                LabeledContent("Render mode", value: displayProfile.summary)
+                Text(displayProfile.explanation)
+                    .foregroundStyle(.secondary)
+                if let retinaResolutionSummary {
+                    LabeledContent("Current Mac render space", value: retinaResolutionSummary)
+                }
+                Button("Apply Display & Relaunch Steam") {
+                    launch()
+                }
+                .disabled(
+                    engine == nil ||
+                        isWorking ||
+                        (engine?.kind != .crossover && !Launcher.isSteamInstalled(in: bottle))
+                )
+                Text("After enabling Retina, open each game’s Display settings and choose a higher resolution. Native Retina is sharpest; lowering the in-game resolution improves frame rate.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Game Profile Helper") {
                 TextField("Game title", text: $title)
                 TextField("Notes, e.g. DX12 or Easy Anti-Cheat", text: $notes)
@@ -348,9 +374,17 @@ private struct BottleDetail: View {
                availableGraphicsBackends.contains(backend) {
                 graphicsBackend = backend
             }
+            if let saved = UserDefaults.standard.string(forKey: displayPreferenceKey),
+               let profile = DisplayProfile(rawValue: saved) {
+                displayProfile = profile
+            }
         }
         .onChange(of: graphicsBackend) { _, newValue in
             UserDefaults.standard.set(newValue.rawValue, forKey: graphicsPreferenceKey)
+            operationStatus = "\(newValue.title) will be used the next time Steam launches."
+        }
+        .onChange(of: displayProfile) { _, newValue in
+            UserDefaults.standard.set(newValue.rawValue, forKey: displayPreferenceKey)
             operationStatus = "\(newValue.title) will be used the next time Steam launches."
         }
         .alert("Uninstall “\(bottle.name)”?", isPresented: $showingUninstallConfirmation) {
@@ -399,13 +433,15 @@ private struct BottleDetail: View {
                 try Launcher.launchSteam(
                     in: bottle,
                     using: readyEngine,
-                    graphicsBackend: graphicsBackend
+                    graphicsBackend: graphicsBackend,
+                    displayProfile: displayProfile
                 )
                 let resolved = Launcher.resolvedGraphicsBackend(
                     graphicsBackend,
                     for: readyEngine
                 )
-                operationStatus = "Steam is opening with \(resolved.title) for games."
+                operationStatus =
+                    "Steam is opening with \(resolved.title) and \(displayProfile.title)."
             } catch {
                 operationStatus = nil
                 report(error.localizedDescription)
@@ -426,7 +462,8 @@ private struct BottleDetail: View {
                 try Launcher.repairAndLaunchSteam(
                     in: bottle,
                     using: readyEngine,
-                    graphicsBackend: graphicsBackend
+                    graphicsBackend: graphicsBackend,
+                    displayProfile: displayProfile
                 )
                 report("Steam’s web cache was rebuilt and Steam was relaunched.")
             } catch {
@@ -507,5 +544,17 @@ private struct BottleDetail: View {
 
     private var graphicsPreferenceKey: String {
         "graphicsBackend.\(bottle.id.uuidString)"
+    }
+
+    private var displayPreferenceKey: String {
+        "displayProfile.\(bottle.id.uuidString)"
+    }
+
+    private var retinaResolutionSummary: String? {
+        guard let screen = NSScreen.main else { return nil }
+        let scale = displayProfile == .standard ? 1 : screen.backingScaleFactor
+        let width = Int(screen.frame.width * scale)
+        let height = Int(screen.frame.height * scale)
+        return "\(width) × \(height)"
     }
 }

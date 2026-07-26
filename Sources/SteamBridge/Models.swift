@@ -135,6 +135,53 @@ enum GraphicsBackend: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum DisplayProfile: String, Codable, CaseIterable, Identifiable, Sendable {
+    case standard
+    case retinaRecommended
+    case retinaCompact
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .standard: "Standard — fastest"
+        case .retinaRecommended: "Retina — recommended"
+        case .retinaCompact: "Retina — smaller UI"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .standard: "1× resolution · 100% Windows scale"
+        case .retinaRecommended: "2× resolution · 200% Windows scale"
+        case .retinaCompact: "2× resolution · 150% Windows scale"
+        }
+    }
+
+    var explanation: String {
+        switch self {
+        case .standard:
+            "Best frame rate and lowest GPU load. Steam and games render at the Mac’s logical resolution."
+        case .retinaRecommended:
+            "Makes Steam sharp while keeping text near its normal physical size. Games can select the Mac’s higher Retina resolutions."
+        case .retinaCompact:
+            "Keeps Retina sharpness but fits more content in Steam by making its interface smaller."
+        }
+    }
+
+    var retinaModeRegistryValue: String {
+        self == .standard ? "N" : "Y"
+    }
+
+    var windowsDPI: Int {
+        switch self {
+        case .standard: 96
+        case .retinaRecommended: 192
+        case .retinaCompact: 144
+        }
+    }
+}
+
 struct GameCompatibility: Sendable {
     let rating: CompatibilityRating
     let explanation: String

@@ -65,7 +65,8 @@ enum Launcher {
     static func launchSteam(
         in bottle: Bottle,
         using engine: Engine,
-        graphicsBackend: GraphicsBackend = .automatic
+        graphicsBackend: GraphicsBackend = .automatic,
+        displayProfile: DisplayProfile? = nil
     ) throws {
         if engine.kind == .crossover {
             try openEngineApp(for: engine)
@@ -80,6 +81,10 @@ enum Launcher {
             throw LaunchError.steamMissing
         }
         try stopBottleProcesses(in: bottle, using: engine)
+        if let displayProfile {
+            try applyDisplayProfile(displayProfile, in: bottle, using: engine)
+            try stopBottleProcesses(in: bottle, using: engine)
+        }
         if isSikarugir(engine) {
             clearSteamWebCaches(in: bottle)
         }
@@ -94,15 +99,26 @@ enum Launcher {
     static func repairAndLaunchSteam(
         in bottle: Bottle,
         using engine: Engine,
-        graphicsBackend: GraphicsBackend = .automatic
+        graphicsBackend: GraphicsBackend = .automatic,
+        displayProfile: DisplayProfile? = nil
     ) throws {
         guard engine.kind != .crossover, engine.kind != .whisky else {
-            try launchSteam(in: bottle, using: engine, graphicsBackend: graphicsBackend)
+            try launchSteam(
+                in: bottle,
+                using: engine,
+                graphicsBackend: graphicsBackend,
+                displayProfile: displayProfile
+            )
             return
         }
         try stopBottleProcesses(in: bottle, using: engine)
         clearSteamWebCaches(in: bottle)
-        try launchSteam(in: bottle, using: engine, graphicsBackend: graphicsBackend)
+        try launchSteam(
+            in: bottle,
+            using: engine,
+            graphicsBackend: graphicsBackend,
+            displayProfile: displayProfile
+        )
     }
 
     static func clearSteamWebCaches(in bottle: Bottle) {
@@ -358,6 +374,45 @@ enum Launcher {
         return available.contains(requested) ? requested : .wineD3D
     }
 
+    static func displayRegistryArguments(for profile: DisplayProfile) -> [[String]] {
+        [
+            [
+                "reg", "add", "HKCU\\Software\\Wine\\Mac Driver",
+                "/v", "RetinaMode",
+                "/t", "REG_SZ",
+                "/d", profile.retinaModeRegistryValue,
+                "/f"
+            ],
+            [
+                "reg", "add", "HKCU\\Control Panel\\Desktop",
+                "/v", "LogPixels",
+                "/t", "REG_DWORD",
+                "/d", String(profile.windowsDPI),
+                "/f"
+            ]
+        ]
+    }
+
+    static func applyDisplayProfile(
+        _ profile: DisplayProfile,
+        in bottle: Bottle,
+        using engine: Engine
+    ) throws {
+        guard engine.kind != .crossover, engine.kind != .whisky else { return }
+        for arguments in displayRegistryArguments(for: profile) {
+            let process = configuredProcess(
+                engine: engine,
+                bottle: bottle,
+                arguments: arguments
+            )
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                throw LaunchError.displayConfigurationFailed(process.terminationStatus)
+            }
+        }
+    }
+
     private static func rendererRootURL(for engine: Engine) -> URL {
         let bin = engine.executableURL.deletingLastPathComponent()
         let bundle = bin.deletingLastPathComponent()
@@ -430,6 +485,7 @@ enum Launcher {
         case steamMissingAfterInstall
         case engineCouldNotOpen
         case installerFailed(Int32)
+        case displayConfigurationFailed(Int32)
         case guiEngine(String)
 
         var errorDescription: String? {
@@ -441,6 +497,8 @@ enum Launcher {
                 "The Steam installer finished, but Steam was not found. Try Install Windows Steam again."
             case .engineCouldNotOpen: "The compatibility engine could not be opened."
             case .installerFailed(let status): "The Steam installer exited with status \(status)."
+            case .displayConfigurationFailed(let status):
+                "The Retina and Windows scaling settings could not be applied (status \(status))."
             case .guiEngine(let message): message
             }
         }

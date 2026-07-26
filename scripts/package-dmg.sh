@@ -15,7 +15,7 @@ TEMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/steambridge-dmg.XXXXXX")
 STAGE="$TEMP_ROOT/stage"
 RW_DMG="$TEMP_ROOT/SteamBridge-rw.dmg"
 OUTPUT_DMG="$PROJECT_ROOT/dist/SteamBridge.dmg"
-VOLUME_NAME="SteamBridge 0.4.0"
+VOLUME_NAME="SteamBridge 0.4.1"
 MOUNT_POINT=""
 
 cleanup() {

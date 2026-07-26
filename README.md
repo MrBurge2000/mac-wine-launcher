@@ -62,6 +62,12 @@ the conservative fallback. SteamBridge also enables Rosetta's AVX advertisement 
 supported macOS versions. Games launched from a Steam session inherit the selected
 graphics mode.
 
+Per-bottle display profiles control Wine's macOS Retina mode and Windows DPI. The
+recommended Retina profile renders Steam at 2× resolution with 200% Windows scaling,
+keeping the interface readable while exposing higher display resolutions to games.
+Each game still controls its own fullscreen resolution; native Retina is sharpest,
+while a lower in-game resolution usually delivers better frame rate.
+
 No translation layer can guarantee every Windows game. Renderer-specific bugs,
 unsupported launchers, Windows driver requirements, DRM, and developer-disabled or
 kernel anti-cheat can still prevent a title from running.
