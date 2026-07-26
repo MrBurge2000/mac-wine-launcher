@@ -56,9 +56,89 @@ enum CompatibilityRating: String, Codable, Sendable {
     case blocked = "Blocked"
 }
 
+enum GraphicsBackend: String, Codable, CaseIterable, Identifiable, Sendable {
+    case automatic
+    case d3dMetal
+    case dxmt
+    case dxvk
+    case d9vk
+    case wineD3D
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .automatic: "AAA Auto"
+        case .d3dMetal: "D3DMetal"
+        case .dxmt: "DXMT"
+        case .dxvk: "DXVK"
+        case .d9vk: "D9VK"
+        case .wineD3D: "WineD3D"
+        }
+    }
+
+    var coverage: String {
+        switch self {
+        case .automatic: "Best available DirectX path"
+        case .d3dMetal: "64-bit DirectX 11 + 12"
+        case .dxmt: "DirectX 10 + 11 through Metal"
+        case .dxvk: "DirectX 10 + 11 through Vulkan"
+        case .d9vk: "DirectX 9 through Vulkan"
+        case .wineD3D: "DirectX 9–11 compatibility fallback"
+        }
+    }
+
+    var explanation: String {
+        switch self {
+        case .automatic:
+            "Uses D3DMetal on supported Apple Silicon Macs for modern AAA games, then falls back to the strongest installed renderer."
+        case .d3dMetal:
+            "The fastest first choice for many modern 64-bit AAA games, including DirectX 12 titles."
+        case .dxmt:
+            "A strong Metal alternative for DirectX 10 and 11 games when D3DMetal has glitches."
+        case .dxvk:
+            "A Vulkan-based DirectX 10 and 11 alternative that can fix renderer-specific problems."
+        case .d9vk:
+            "An experimental high-performance path for older DirectX 9 games."
+        case .wineD3D:
+            "The most conservative OpenGL/Vulkan fallback. It is slower, but useful for older or unusual games."
+        }
+    }
+
+    var rendererFolderName: String? {
+        switch self {
+        case .automatic, .wineD3D: nil
+        case .d3dMetal: "d3dmetal"
+        case .dxmt: "dxmt"
+        case .dxvk: "dxvk"
+        case .d9vk: "d9vk"
+        }
+    }
+
+    static func recommended(
+        isAppleSilicon: Bool,
+        operatingSystemMajorVersion: Int,
+        available: Set<GraphicsBackend>
+    ) -> GraphicsBackend {
+        if isAppleSilicon,
+           operatingSystemMajorVersion >= 15,
+           available.contains(.d3dMetal) {
+            return .d3dMetal
+        }
+        if isAppleSilicon, available.contains(.dxmt) {
+            return .dxmt
+        }
+        if available.contains(.dxvk) {
+            return .dxvk
+        }
+        return .wineD3D
+    }
+}
+
 struct GameCompatibility: Sendable {
     let rating: CompatibilityRating
     let explanation: String
+    let recommendedBackend: GraphicsBackend
 
     static func assess(title: String, notes: String) -> GameCompatibility {
         let text = "\(title) \(notes)".lowercased()
@@ -66,24 +146,50 @@ struct GameCompatibility: Sendable {
         if blockers.contains(where: text.contains) {
             return .init(
                 rating: .blocked,
-                explanation: "Kernel-level or unsupported anti-cheat is a common hard blocker under Wine."
+                explanation: "Kernel-level or developer-disabled anti-cheat cannot be fixed by changing the DirectX renderer.",
+                recommendedBackend: .automatic
             )
         }
         if text.contains("directx 12") || text.contains("dx12") {
             return .init(
-                rating: .limited,
-                explanation: "DirectX 12 support varies by engine, macOS version, and Apple Silicon GPU."
+                rating: .likely,
+                explanation: "Use D3DMetal for the best available 64-bit DirectX 12 path on Apple Silicon.",
+                recommendedBackend: .d3dMetal
             )
         }
-        if text.contains("directx 11") || text.contains("dx11") || text.contains("single player") {
+        if text.contains("directx 11") || text.contains("dx11") ||
+            text.contains("unreal engine") || text.contains("aaa") {
             return .init(
                 rating: .likely,
-                explanation: "This profile is often a good candidate, but it is not a guarantee."
+                explanation: "Start with AAA Auto. If the game has visual glitches, switch to DXMT, then DXVK.",
+                recommendedBackend: .automatic
+            )
+        }
+        if text.contains("directx 10") || text.contains("dx10") {
+            return .init(
+                rating: .likely,
+                explanation: "DXMT is the preferred Metal path for DirectX 10 and also supports DirectX 11.",
+                recommendedBackend: .dxmt
+            )
+        }
+        if text.contains("directx 9") || text.contains("dx9") || text.contains("older game") {
+            return .init(
+                rating: .likely,
+                explanation: "Try D9VK for speed. WineD3D remains the safer fallback for unusual older games.",
+                recommendedBackend: .d9vk
+            )
+        }
+        if text.contains("single player") {
+            return .init(
+                rating: .likely,
+                explanation: "Single-player games without anti-cheat are often good candidates for AAA Auto.",
+                recommendedBackend: .automatic
             )
         }
         return .init(
             rating: .unknown,
-            explanation: "Launch it in an isolated bottle and check community compatibility reports first."
+            explanation: "Start with AAA Auto, then try DXMT, DXVK, and WineD3D if the first renderer has problems.",
+            recommendedBackend: .automatic
         )
     }
 }

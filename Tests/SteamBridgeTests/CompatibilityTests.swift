@@ -10,6 +10,31 @@ import Testing
 @Test func directXElevenIsLikely() {
     let result = GameCompatibility.assess(title: "Example", notes: "DX11 single player")
     #expect(result.rating == .likely)
+    #expect(result.recommendedBackend == .automatic)
+}
+
+@Test func directXTwelveUsesD3DMetal() {
+    let result = GameCompatibility.assess(title: "Big game", notes: "DirectX 12")
+    #expect(result.rating == .likely)
+    #expect(result.recommendedBackend == .d3dMetal)
+}
+
+@Test func automaticRendererPrefersModernMetalOnSupportedAppleSilicon() {
+    let backend = GraphicsBackend.recommended(
+        isAppleSilicon: true,
+        operatingSystemMajorVersion: 15,
+        available: [.d3dMetal, .dxmt, .dxvk, .wineD3D]
+    )
+    #expect(backend == .d3dMetal)
+}
+
+@Test func automaticRendererFallsBackToDXMT() {
+    let backend = GraphicsBackend.recommended(
+        isAppleSilicon: true,
+        operatingSystemMajorVersion: 14,
+        available: [.d3dMetal, .dxmt, .wineD3D]
+    )
+    #expect(backend == .dxmt)
 }
 
 @Test func freeRuntimeIsPreferred() {
@@ -50,6 +75,47 @@ import Testing
 
 @Test func steamInstallerUsesSilentMode() {
     #expect(Launcher.silentInstallerArguments == ["/S"])
+}
+
+@Test func managedRuntimeFindsAndActivatesD3DMetal() throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let runtime = root.appending(path: "Sikarugir")
+    let wine = runtime.appending(path: "wswine.bundle/bin/wine")
+    let d3dMetal = runtime.appending(
+        path: "Frameworks/renderer/d3dmetal/wine/x86_64-windows/d3d12.dll"
+    )
+    let shared = runtime.appending(
+        path: "Frameworks/renderer/d3dmetal/external/libd3dshared.dylib"
+    )
+    try FileManager.default.createDirectory(
+        at: wine.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    try FileManager.default.createDirectory(
+        at: d3dMetal.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    try FileManager.default.createDirectory(
+        at: shared.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    try Data().write(to: wine)
+    try Data().write(to: d3dMetal)
+    try Data().write(to: shared)
+    let engine = Engine(kind: .steamBridge, executableURL: wine)
+    let bottle = Bottle(name: "Test", path: "/Bottle", engine: .steamBridge)
+
+    #expect(Launcher.availableGraphicsBackends(for: engine).contains(.d3dMetal))
+    let environment = Launcher.configuredEnvironment(
+        engine: engine,
+        bottle: bottle,
+        graphicsBackend: .d3dMetal,
+        baseEnvironment: [:]
+    )
+    #expect(environment["WINEDLLPATH_PREPEND"]?.contains("/renderer/d3dmetal/wine") == true)
+    #expect(environment["CX_D3DMETALPATH"]?.contains("/renderer/d3dmetal/external") == true)
+    #expect(environment["CX_APPLEGPTK_LIBD3DSHARED_PATH"] == shared.path)
 }
 
 @Test func steamInstallationDetectionRequiresExecutable() throws {

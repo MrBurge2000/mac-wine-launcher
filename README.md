@@ -55,8 +55,16 @@ downloads are pinned to trusted SHA-256 checksums and stored under SteamBridge's
 Application Support directory. CrossOver and system Wine installations remain
 supported, while Whisky is detected only for existing users.
 
-The free runtime uses Wine's available WineD3D/Vulkan path. It will not match every
-commercial CrossOver optimization, and some DirectX 12 titles will still fail.
+The free runtime includes a switchable graphics stack. **AAA Auto** uses D3DMetal for
+64-bit DirectX 11 and 12 games on supported Apple Silicon Macs. DXMT and DXVK provide
+alternate DirectX 10/11 paths, D9VK accelerates many DirectX 9 games, and WineD3D is
+the conservative fallback. SteamBridge also enables Rosetta's AVX advertisement on
+supported macOS versions. Games launched from a Steam session inherit the selected
+graphics mode.
+
+No translation layer can guarantee every Windows game. Renderer-specific bugs,
+unsupported launchers, Windows driver requirements, DRM, and developer-disabled or
+kernel anti-cheat can still prevent a title from running.
 
 The managed runtime contains Steam-specific CEF and macOS windowing fixes. A normal
 **Launch Steam** automatically upgrades legacy SteamBridge runtimes when needed, stops

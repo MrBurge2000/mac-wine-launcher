@@ -62,7 +62,11 @@ enum Launcher {
         ))
     }
 
-    static func launchSteam(in bottle: Bottle, using engine: Engine) throws {
+    static func launchSteam(
+        in bottle: Bottle,
+        using engine: Engine,
+        graphicsBackend: GraphicsBackend = .automatic
+    ) throws {
         if engine.kind == .crossover {
             try openEngineApp(for: engine)
             return
@@ -79,17 +83,26 @@ enum Launcher {
         if isSikarugir(engine) {
             clearSteamWebCaches(in: bottle)
         }
-        try run(engine: engine, bottle: bottle, arguments: [steamPath] + steamArguments(for: engine))
+        try run(
+            engine: engine,
+            bottle: bottle,
+            arguments: [steamPath] + steamArguments(for: engine),
+            graphicsBackend: graphicsBackend
+        )
     }
 
-    static func repairAndLaunchSteam(in bottle: Bottle, using engine: Engine) throws {
+    static func repairAndLaunchSteam(
+        in bottle: Bottle,
+        using engine: Engine,
+        graphicsBackend: GraphicsBackend = .automatic
+    ) throws {
         guard engine.kind != .crossover, engine.kind != .whisky else {
-            try launchSteam(in: bottle, using: engine)
+            try launchSteam(in: bottle, using: engine, graphicsBackend: graphicsBackend)
             return
         }
         try stopBottleProcesses(in: bottle, using: engine)
         clearSteamWebCaches(in: bottle)
-        try launchSteam(in: bottle, using: engine)
+        try launchSteam(in: bottle, using: engine, graphicsBackend: graphicsBackend)
     }
 
     static func clearSteamWebCaches(in bottle: Bottle) {
@@ -173,8 +186,18 @@ enum Launcher {
         }
     }
 
-    private static func run(engine: Engine, bottle: Bottle, arguments: [String]) throws {
-        let process = configuredProcess(engine: engine, bottle: bottle, arguments: arguments)
+    private static func run(
+        engine: Engine,
+        bottle: Bottle,
+        arguments: [String],
+        graphicsBackend: GraphicsBackend = .wineD3D
+    ) throws {
+        let process = configuredProcess(
+            engine: engine,
+            bottle: bottle,
+            arguments: arguments,
+            graphicsBackend: graphicsBackend
+        )
         try process.run()
     }
 
@@ -196,12 +219,17 @@ enum Launcher {
     private static func configuredProcess(
         engine: Engine,
         bottle: Bottle,
-        arguments: [String]
+        arguments: [String],
+        graphicsBackend: GraphicsBackend = .wineD3D
     ) -> Process {
         let process = Process()
         process.executableURL = engine.executableURL
         process.arguments = arguments
-        process.environment = configuredEnvironment(engine: engine, bottle: bottle)
+        process.environment = configuredEnvironment(
+            engine: engine,
+            bottle: bottle,
+            graphicsBackend: graphicsBackend
+        )
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         return process
@@ -216,8 +244,13 @@ enum Launcher {
             engine.executableURL.path.localizedCaseInsensitiveContains("Sikarugir")
     }
 
-    private static func configuredEnvironment(engine: Engine, bottle: Bottle) -> [String: String] {
-        var environment = ProcessInfo.processInfo.environment
+    static func configuredEnvironment(
+        engine: Engine,
+        bottle: Bottle,
+        graphicsBackend: GraphicsBackend = .wineD3D,
+        baseEnvironment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String: String] {
+        var environment = baseEnvironment
         environment["WINEPREFIX"] = bottle.path
         environment["WINEDEBUG"] = "-all"
 
@@ -249,7 +282,125 @@ enum Launcher {
             dllPaths.joined(separator: ":"),
             existing: environment["WINEDLLPATH"]
         )
+        applyGraphicsBackend(
+            graphicsBackend,
+            engine: engine,
+            environment: &environment
+        )
+        #if arch(arm64)
+        if ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 15 {
+            environment["ROSETTA_ADVERTISE_AVX"] = "1"
+        }
+        #endif
         return environment
+    }
+
+    static func availableGraphicsBackends(
+        for engine: Engine,
+        fileManager: FileManager = .default
+    ) -> Set<GraphicsBackend> {
+        guard isSikarugir(engine) else { return [.automatic, .wineD3D] }
+        let rendererRoot = rendererRootURL(for: engine)
+        var result: Set<GraphicsBackend> = [.automatic, .wineD3D]
+        for backend in GraphicsBackend.allCases {
+            guard let folder = backend.rendererFolderName else { continue }
+            if backend == .d3dMetal,
+               (!isAppleSiliconProcess ||
+                   ProcessInfo.processInfo.operatingSystemVersion.majorVersion < 15) {
+                continue
+            }
+            if backend == .dxmt, !isAppleSiliconProcess {
+                continue
+            }
+            let renderer = rendererRoot.appending(path: folder, directoryHint: .isDirectory)
+            let requiredRelativePath: String
+            switch backend {
+            case .d3dMetal:
+                requiredRelativePath = "wine/x86_64-windows/d3d12.dll"
+            case .dxmt, .dxvk:
+                requiredRelativePath = "wine/x86_64-windows/d3d11.dll"
+            case .d9vk:
+                requiredRelativePath = "wine/x86_64-windows/d3d9.dll"
+            case .automatic, .wineD3D:
+                continue
+            }
+            if fileManager.fileExists(
+                atPath: renderer.appending(path: requiredRelativePath).path
+            ) {
+                result.insert(backend)
+            }
+        }
+        return result
+    }
+
+    static func resolvedGraphicsBackend(
+        _ requested: GraphicsBackend,
+        for engine: Engine,
+        isAppleSilicon: Bool = {
+            #if arch(arm64)
+            true
+            #else
+            false
+            #endif
+        }(),
+        operatingSystemMajorVersion: Int =
+            ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+        fileManager: FileManager = .default
+    ) -> GraphicsBackend {
+        let available = availableGraphicsBackends(for: engine, fileManager: fileManager)
+        if requested == .automatic {
+            return GraphicsBackend.recommended(
+                isAppleSilicon: isAppleSilicon,
+                operatingSystemMajorVersion: operatingSystemMajorVersion,
+                available: available
+            )
+        }
+        return available.contains(requested) ? requested : .wineD3D
+    }
+
+    private static func rendererRootURL(for engine: Engine) -> URL {
+        let bin = engine.executableURL.deletingLastPathComponent()
+        let bundle = bin.deletingLastPathComponent()
+        let runtime = bundle.deletingLastPathComponent()
+        return runtime.appending(path: "Frameworks/renderer", directoryHint: .isDirectory)
+    }
+
+    private static func applyGraphicsBackend(
+        _ requested: GraphicsBackend,
+        engine: Engine,
+        environment: inout [String: String]
+    ) {
+        environment.removeValue(forKey: "WINEDLLPATH_PREPEND")
+        environment.removeValue(forKey: "CX_D3DMETALPATH")
+        environment.removeValue(forKey: "CX_APPLEGPT_LIBD3DSHARED_PATH")
+        environment.removeValue(forKey: "CX_APPLEGPTK_LIBD3DSHARED_PATH")
+        environment.removeValue(forKey: "DXMT_LOG_LEVEL")
+
+        let backend = resolvedGraphicsBackend(requested, for: engine)
+        guard let folder = backend.rendererFolderName else { return }
+
+        let renderer = rendererRootURL(for: engine)
+            .appending(path: folder, directoryHint: .isDirectory)
+        environment["WINEDLLPATH_PREPEND"] = renderer
+            .appending(path: "wine", directoryHint: .isDirectory).path
+
+        if backend == .d3dMetal {
+            let external = renderer.appending(path: "external", directoryHint: .isDirectory)
+            let sharedLibrary = external.appending(path: "libd3dshared.dylib").path
+            environment["CX_D3DMETALPATH"] = external.path
+            environment["CX_APPLEGPT_LIBD3DSHARED_PATH"] = sharedLibrary
+            environment["CX_APPLEGPTK_LIBD3DSHARED_PATH"] = sharedLibrary
+        } else if backend == .dxmt {
+            environment["DXMT_LOG_LEVEL"] = "none"
+        }
+    }
+
+    private static var isAppleSiliconProcess: Bool {
+        #if arch(arm64)
+        true
+        #else
+        false
+        #endif
     }
 
     private static func joinedPath(_ prefix: String, existing: String?) -> String {

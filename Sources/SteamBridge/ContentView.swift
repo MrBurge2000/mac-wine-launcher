@@ -186,6 +186,7 @@ private struct BottleDetail: View {
     @State private var runtimeProgress: RuntimeInstaller.InstallProgress?
     @State private var steamProgress: Launcher.SteamInstallProgress?
     @State private var operationStatus: String?
+    @State private var graphicsBackend: GraphicsBackend = .automatic
 
     var body: some View {
         Form {
@@ -269,7 +270,42 @@ private struct BottleDetail: View {
                 }
             }
 
-            Section("Compatibility Check") {
+            Section("AAA Game Graphics") {
+                Picker("Graphics mode", selection: $graphicsBackend) {
+                    ForEach(availableGraphicsBackends) { backend in
+                        Text("\(backend.title) — \(backend.coverage)")
+                            .tag(backend)
+                    }
+                }
+                LabeledContent(
+                    "Active renderer",
+                    value: resolvedGraphicsBackend.title
+                )
+                Text(graphicsBackend.explanation)
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Text("Available renderer coverage:")
+                    Label("DX9", systemImage: "checkmark.circle.fill")
+                    Label("DX10", systemImage: "checkmark.circle.fill")
+                    Label("DX11", systemImage: "checkmark.circle.fill")
+                    Label("DX12", systemImage: "checkmark.circle.fill")
+                }
+                .font(.caption)
+                .foregroundStyle(.green)
+                Button("Apply Mode & Relaunch Steam") {
+                    launch()
+                }
+                .disabled(
+                    engine == nil ||
+                        isWorking ||
+                        (engine?.kind != .crossover && !Launcher.isSteamInstalled(in: bottle))
+                )
+                Text("Games launched by this Steam session inherit the selected DirectX renderer. If one game glitches, try DXMT, then DXVK, then WineD3D.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Game Profile Helper") {
                 TextField("Game title", text: $title)
                 TextField("Notes, e.g. DX12 or Easy Anti-Cheat", text: $notes)
                 Button("Assess") {
@@ -278,11 +314,16 @@ private struct BottleDetail: View {
                 if let assessment {
                     LabeledContent("Rating", value: assessment.rating.rawValue)
                     Text(assessment.explanation).foregroundStyle(.secondary)
+                    if assessment.rating != .blocked {
+                        Button("Use \(assessment.recommendedBackend.title)") {
+                            graphicsBackend = assessment.recommendedBackend
+                        }
+                    }
                 }
             }
 
-            Section("Important limits") {
-                Text("This does not emulate a PC or bypass DRM. Kernel anti-cheat, unsupported launchers, AVX-only games, and some DirectX 12 titles may not run.")
+            Section("Compatibility limits") {
+                Text("SteamBridge now activates dedicated DirectX 9, 10, 11, and 12 renderers. It cannot bypass DRM or supply Windows kernel drivers; games that require unsupported kernel anti-cheat can still be blocked.")
                     .foregroundStyle(.secondary)
             }
 
@@ -301,6 +342,17 @@ private struct BottleDetail: View {
         }
         .formStyle(.grouped)
         .navigationTitle(bottle.name)
+        .onAppear {
+            if let saved = UserDefaults.standard.string(forKey: graphicsPreferenceKey),
+               let backend = GraphicsBackend(rawValue: saved),
+               availableGraphicsBackends.contains(backend) {
+                graphicsBackend = backend
+            }
+        }
+        .onChange(of: graphicsBackend) { _, newValue in
+            UserDefaults.standard.set(newValue.rawValue, forKey: graphicsPreferenceKey)
+            operationStatus = "\(newValue.title) will be used the next time Steam launches."
+        }
         .alert("Uninstall “\(bottle.name)”?", isPresented: $showingUninstallConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Uninstall Bottle", role: .destructive) {
@@ -344,8 +396,16 @@ private struct BottleDetail: View {
         Task {
             do {
                 let readyEngine = try await prepareEngine()
-                try Launcher.launchSteam(in: bottle, using: readyEngine)
-                operationStatus = "Steam is opening."
+                try Launcher.launchSteam(
+                    in: bottle,
+                    using: readyEngine,
+                    graphicsBackend: graphicsBackend
+                )
+                let resolved = Launcher.resolvedGraphicsBackend(
+                    graphicsBackend,
+                    for: readyEngine
+                )
+                operationStatus = "Steam is opening with \(resolved.title) for games."
             } catch {
                 operationStatus = nil
                 report(error.localizedDescription)
@@ -363,7 +423,11 @@ private struct BottleDetail: View {
         Task {
             do {
                 let readyEngine = try await prepareEngine()
-                try Launcher.repairAndLaunchSteam(in: bottle, using: readyEngine)
+                try Launcher.repairAndLaunchSteam(
+                    in: bottle,
+                    using: readyEngine,
+                    graphicsBackend: graphicsBackend
+                )
                 report("Steam’s web cache was rebuilt and Steam was relaunched.")
             } catch {
                 report(error.localizedDescription)
@@ -428,5 +492,20 @@ private struct BottleDetail: View {
         return Launcher.isSteamInstalled(in: bottle)
             ? "Reinstall Windows Steam"
             : "Install Windows Steam"
+    }
+
+    private var availableGraphicsBackends: [GraphicsBackend] {
+        guard let engine else { return [.automatic, .wineD3D] }
+        let available = Launcher.availableGraphicsBackends(for: engine)
+        return GraphicsBackend.allCases.filter(available.contains)
+    }
+
+    private var resolvedGraphicsBackend: GraphicsBackend {
+        guard let engine else { return .wineD3D }
+        return Launcher.resolvedGraphicsBackend(graphicsBackend, for: engine)
+    }
+
+    private var graphicsPreferenceKey: String {
+        "graphicsBackend.\(bottle.id.uuidString)"
     }
 }
