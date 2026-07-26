@@ -188,6 +188,7 @@ private struct BottleDetail: View {
     @State private var operationStatus: String?
     @State private var graphicsBackend: GraphicsBackend = .automatic
     @State private var displayProfile: DisplayProfile = .retinaRecommended
+    @State private var mouseCaptureProfile: MouseCaptureProfile = .menuSafe
 
     var body: some View {
         Form {
@@ -331,6 +332,30 @@ private struct BottleDetail: View {
                     .foregroundStyle(.secondary)
             }
 
+            if Launcher.isDontPanicInstalled(in: bottle) {
+                Section("Don’t Panic! Mouse Fix") {
+                    Label(
+                        "Installed game detected",
+                        systemImage: "cursorarrow.motionlines"
+                    )
+                    .foregroundStyle(.green)
+                    Picker("Mouse mode", selection: $mouseCaptureProfile) {
+                        ForEach(MouseCaptureProfile.allCases) { profile in
+                            Text(profile.title).tag(profile)
+                        }
+                    }
+                    Text(mouseCaptureProfile.summary)
+                        .foregroundStyle(.secondary)
+                    Button("Apply Mouse Fix & Relaunch Steam") {
+                        launch()
+                    }
+                    .disabled(engine == nil || isWorking)
+                    Text("SteamBridge applies this only to Don’t Panic—not to your other games. Menu-safe mode is applied automatically on every Steam launch. If the game ever captures the pointer again, press ⌥↩ to toggle window mode, then ⌘Tab back to SteamBridge.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Game Profile Helper") {
                 TextField("Game title", text: $title)
                 TextField("Notes, e.g. DX12 or Easy Anti-Cheat", text: $notes)
@@ -378,6 +403,10 @@ private struct BottleDetail: View {
                let profile = DisplayProfile(rawValue: saved) {
                 displayProfile = profile
             }
+            if let saved = UserDefaults.standard.string(forKey: inputPreferenceKey),
+               let profile = MouseCaptureProfile(rawValue: saved) {
+                mouseCaptureProfile = profile
+            }
         }
         .onChange(of: graphicsBackend) { _, newValue in
             UserDefaults.standard.set(newValue.rawValue, forKey: graphicsPreferenceKey)
@@ -386,6 +415,10 @@ private struct BottleDetail: View {
         .onChange(of: displayProfile) { _, newValue in
             UserDefaults.standard.set(newValue.rawValue, forKey: displayPreferenceKey)
             operationStatus = "\(newValue.title) will be used the next time Steam launches."
+        }
+        .onChange(of: mouseCaptureProfile) { _, newValue in
+            UserDefaults.standard.set(newValue.rawValue, forKey: inputPreferenceKey)
+            operationStatus = "\(newValue.title) will be used for Don’t Panic the next time Steam launches."
         }
         .alert("Uninstall “\(bottle.name)”?", isPresented: $showingUninstallConfirmation) {
             Button("Cancel", role: .cancel) {}
@@ -434,14 +467,18 @@ private struct BottleDetail: View {
                     in: bottle,
                     using: readyEngine,
                     graphicsBackend: graphicsBackend,
-                    displayProfile: displayProfile
+                    displayProfile: displayProfile,
+                    mouseCaptureProfile: mouseCaptureProfile
                 )
                 let resolved = Launcher.resolvedGraphicsBackend(
                     graphicsBackend,
                     for: readyEngine
                 )
+                let inputStatus = Launcher.isDontPanicInstalled(in: bottle)
+                    ? " Don’t Panic is using \(mouseCaptureProfile.title)."
+                    : ""
                 operationStatus =
-                    "Steam is opening with \(resolved.title) and \(displayProfile.title)."
+                    "Steam is opening with \(resolved.title) and \(displayProfile.title).\(inputStatus)"
             } catch {
                 operationStatus = nil
                 report(error.localizedDescription)
@@ -463,7 +500,8 @@ private struct BottleDetail: View {
                     in: bottle,
                     using: readyEngine,
                     graphicsBackend: graphicsBackend,
-                    displayProfile: displayProfile
+                    displayProfile: displayProfile,
+                    mouseCaptureProfile: mouseCaptureProfile
                 )
                 report("Steam’s web cache was rebuilt and Steam was relaunched.")
             } catch {
@@ -548,6 +586,10 @@ private struct BottleDetail: View {
 
     private var displayPreferenceKey: String {
         "displayProfile.\(bottle.id.uuidString)"
+    }
+
+    private var inputPreferenceKey: String {
+        "mouseCaptureProfile.\(bottle.id.uuidString)"
     }
 
     private var retinaResolutionSummary: String? {

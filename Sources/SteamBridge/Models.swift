@@ -182,6 +182,41 @@ enum DisplayProfile: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum MouseCaptureProfile: String, Codable, CaseIterable, Identifiable, Sendable {
+    case menuSafe
+    case gameDefault
+    case forceCapture
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .menuSafe: "Menu-safe — recommended"
+        case .gameDefault: "Game default"
+        case .forceCapture: "Force camera capture"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .menuSafe:
+            "Stops Wine from pinning the pointer when this game opens menus."
+        case .gameDefault:
+            "Lets the game choose when Wine should capture and warp the pointer."
+        case .forceCapture:
+            "Keeps the pointer captured for camera movement in gameplay."
+        }
+    }
+
+    var wineRegistryValue: String {
+        switch self {
+        case .menuSafe: "disable"
+        case .gameDefault: "enabled"
+        case .forceCapture: "force"
+        }
+    }
+}
+
 struct GameCompatibility: Sendable {
     let rating: CompatibilityRating
     let explanation: String

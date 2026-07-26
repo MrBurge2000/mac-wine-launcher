@@ -4,6 +4,7 @@ import Foundation
 enum Launcher {
     static let steamInstallerURL = URL(string: "https://cdn.akamai.steamstatic.com/client/installer/SteamSetup.exe")!
     static let minimumSteamInstallerSize = 1_000_000
+    static let dontPanicExecutableName = "Don't Panic! It is Just Turbulence.exe"
     // Retained for advanced/legacy Wine installs. The managed Sikarugir runtime
     // carries its own Steam-specific CEF fixes and must launch without these flags.
     static let steamCompatibilityArguments = [
@@ -66,7 +67,8 @@ enum Launcher {
         in bottle: Bottle,
         using engine: Engine,
         graphicsBackend: GraphicsBackend = .automatic,
-        displayProfile: DisplayProfile? = nil
+        displayProfile: DisplayProfile? = nil,
+        mouseCaptureProfile: MouseCaptureProfile = .menuSafe
     ) throws {
         if engine.kind == .crossover {
             try openEngineApp(for: engine)
@@ -83,6 +85,16 @@ enum Launcher {
         try stopBottleProcesses(in: bottle, using: engine)
         if let displayProfile {
             try applyDisplayProfile(displayProfile, in: bottle, using: engine)
+        }
+        if isDontPanicInstalled(in: bottle) {
+            try applyGameInputProfile(
+                mouseCaptureProfile,
+                executableName: dontPanicExecutableName,
+                in: bottle,
+                using: engine
+            )
+        }
+        if displayProfile != nil || isDontPanicInstalled(in: bottle) {
             try stopBottleProcesses(in: bottle, using: engine)
         }
         if isSikarugir(engine) {
@@ -100,14 +112,16 @@ enum Launcher {
         in bottle: Bottle,
         using engine: Engine,
         graphicsBackend: GraphicsBackend = .automatic,
-        displayProfile: DisplayProfile? = nil
+        displayProfile: DisplayProfile? = nil,
+        mouseCaptureProfile: MouseCaptureProfile = .menuSafe
     ) throws {
         guard engine.kind != .crossover, engine.kind != .whisky else {
             try launchSteam(
                 in: bottle,
                 using: engine,
                 graphicsBackend: graphicsBackend,
-                displayProfile: displayProfile
+                displayProfile: displayProfile,
+                mouseCaptureProfile: mouseCaptureProfile
             )
             return
         }
@@ -117,7 +131,8 @@ enum Launcher {
             in: bottle,
             using: engine,
             graphicsBackend: graphicsBackend,
-            displayProfile: displayProfile
+            displayProfile: displayProfile,
+            mouseCaptureProfile: mouseCaptureProfile
         )
     }
 
@@ -152,6 +167,21 @@ enum Launcher {
 
     static func isSteamInstalled(in bottle: Bottle, fileManager: FileManager = .default) -> Bool {
         fileManager.isExecutableFile(atPath: steamExecutableURL(in: bottle).path)
+    }
+
+    static func dontPanicExecutableURL(in bottle: Bottle) -> URL {
+        URL(fileURLWithPath: bottle.path, isDirectory: true)
+            .appending(
+                path: "drive_c/Program Files (x86)/Steam/steamapps/common/Don't Panic! It is Just a Turbulence"
+            )
+            .appending(path: dontPanicExecutableName)
+    }
+
+    static func isDontPanicInstalled(
+        in bottle: Bottle,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        fileManager.isExecutableFile(atPath: dontPanicExecutableURL(in: bottle).path)
     }
 
     static func validateSteamInstaller(at url: URL) throws {
@@ -413,6 +443,46 @@ enum Launcher {
         }
     }
 
+    static func gameInputRegistryArguments(
+        for profile: MouseCaptureProfile,
+        executableName: String
+    ) -> [[String]] {
+        [
+            [
+                "reg", "add",
+                "HKCU\\Software\\Wine\\AppDefaults\\\(executableName)\\DirectInput",
+                "/v", "MouseWarpOverride",
+                "/t", "REG_SZ",
+                "/d", profile.wineRegistryValue,
+                "/f"
+            ]
+        ]
+    }
+
+    static func applyGameInputProfile(
+        _ profile: MouseCaptureProfile,
+        executableName: String,
+        in bottle: Bottle,
+        using engine: Engine
+    ) throws {
+        guard engine.kind != .crossover, engine.kind != .whisky else { return }
+        for arguments in gameInputRegistryArguments(
+            for: profile,
+            executableName: executableName
+        ) {
+            let process = configuredProcess(
+                engine: engine,
+                bottle: bottle,
+                arguments: arguments
+            )
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                throw LaunchError.inputConfigurationFailed(process.terminationStatus)
+            }
+        }
+    }
+
     private static func rendererRootURL(for engine: Engine) -> URL {
         let bin = engine.executableURL.deletingLastPathComponent()
         let bundle = bin.deletingLastPathComponent()
@@ -486,6 +556,7 @@ enum Launcher {
         case engineCouldNotOpen
         case installerFailed(Int32)
         case displayConfigurationFailed(Int32)
+        case inputConfigurationFailed(Int32)
         case guiEngine(String)
 
         var errorDescription: String? {
@@ -499,6 +570,8 @@ enum Launcher {
             case .installerFailed(let status): "The Steam installer exited with status \(status)."
             case .displayConfigurationFailed(let status):
                 "The Retina and Windows scaling settings could not be applied (status \(status))."
+            case .inputConfigurationFailed(let status):
+                "The game-specific mouse settings could not be applied (status \(status))."
             case .guiEngine(let message): message
             }
         }

@@ -133,6 +133,29 @@ import Testing
     #expect(commands[1].contains("96"))
 }
 
+@Test func dontPanicMenuSafeProfileIsExecutableSpecific() {
+    let commands = Launcher.gameInputRegistryArguments(
+        for: .menuSafe,
+        executableName: Launcher.dontPanicExecutableName
+    )
+    #expect(commands.count == 1)
+    #expect(commands[0].contains("MouseWarpOverride"))
+    #expect(commands[0].contains("disable"))
+    #expect(
+        commands[0].contains(
+            "HKCU\\Software\\Wine\\AppDefaults\\Don't Panic! It is Just Turbulence.exe\\DirectInput"
+        )
+    )
+}
+
+@Test func dontPanicCameraProfileCanForceCapture() {
+    let commands = Launcher.gameInputRegistryArguments(
+        for: .forceCapture,
+        executableName: Launcher.dontPanicExecutableName
+    )
+    #expect(commands[0].contains("force"))
+}
+
 @Test func steamInstallationDetectionRequiresExecutable() throws {
     let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
