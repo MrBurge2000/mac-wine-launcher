@@ -184,6 +184,8 @@ private struct BottleDetail: View {
     @State private var isUninstalling = false
     @State private var showingUninstallConfirmation = false
     @State private var runtimeProgress: RuntimeInstaller.InstallProgress?
+    @State private var steamProgress: Launcher.SteamInstallProgress?
+    @State private var operationStatus: String?
 
     var body: some View {
         Form {
@@ -208,21 +210,53 @@ private struct BottleDetail: View {
             }
 
             Section("Steam") {
+                if Launcher.isSteamInstalled(in: bottle) {
+                    Label("Windows Steam is installed", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                } else {
+                    Label("Windows Steam is not installed yet", systemImage: "arrow.down.circle")
+                        .foregroundStyle(.secondary)
+                }
                 HStack {
-                    Button(engine?.kind == .crossover ? "Open CrossOver Installer" : "Install Windows Steam") {
+                    Button(installButtonTitle) {
                         install()
                     }
+                    .disabled(engine == nil || isWorking)
                     Button(engine?.kind == .crossover ? "Open CrossOver" : "Launch Steam") {
                         launch()
                     }
+                    .disabled(
+                        engine == nil ||
+                            isWorking ||
+                            (engine?.kind != .crossover && !Launcher.isSteamInstalled(in: bottle))
+                    )
                 }
-                .disabled(engine == nil || isWorking)
-                if isWorking { ProgressView() }
+                if isWorking, steamProgress == nil, runtimeProgress == nil {
+                    ProgressView("Preparing…")
+                }
+                if let steamProgress {
+                    if let fraction = steamProgress.fraction {
+                        ProgressView(value: fraction)
+                        Text("\(Int(fraction * 100))% · \(steamProgress.stage.rawValue)")
+                            .font(.caption)
+                            .monospacedDigit()
+                    } else {
+                        ProgressView()
+                    }
+                    Text(steamProgress.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if let runtimeProgress {
                     if let fraction = runtimeProgress.fraction {
                         ProgressView(value: fraction)
                     }
                     Text("\(runtimeProgress.stage.rawValue): \(runtimeProgress.detail)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let operationStatus {
+                    Label(operationStatus, systemImage: "info.circle")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -279,15 +313,20 @@ private struct BottleDetail: View {
 
     private func install() {
         guard engine != nil else { return }
+        steamProgress = nil
+        operationStatus = nil
         isWorking = true
         Task {
             do {
                 let readyEngine = try await prepareEngine()
-                try await Launcher.installSteam(in: bottle, using: readyEngine)
+                try await Launcher.installSteam(
+                    in: bottle,
+                    using: readyEngine
+                ) { steamProgress = $0 }
                 if readyEngine.kind == .crossover {
                     report("CrossOver opened. Select Steam, click Install, and let its supported recipe configure the bottle.")
                 } else {
-                    report("Steam installed successfully and is updating toward the sign-in page.")
+                    operationStatus = "Steam is installed. First launch may download ~570 MB of Steam updates before sign-in."
                 }
             } catch {
                 report(error.localizedDescription)
@@ -299,12 +338,16 @@ private struct BottleDetail: View {
 
     private func launch() {
         guard engine != nil else { return }
+        steamProgress = nil
+        operationStatus = "Opening Steam…"
         isWorking = true
         Task {
             do {
                 let readyEngine = try await prepareEngine()
                 try Launcher.launchSteam(in: bottle, using: readyEngine)
+                operationStatus = "Steam is opening."
             } catch {
+                operationStatus = nil
                 report(error.localizedDescription)
             }
             runtimeProgress = nil
@@ -314,6 +357,8 @@ private struct BottleDetail: View {
 
     private func repairSteam() {
         guard engine != nil else { return }
+        steamProgress = nil
+        operationStatus = nil
         isWorking = true
         Task {
             do {
@@ -329,6 +374,8 @@ private struct BottleDetail: View {
     }
 
     private func updateRuntime() {
+        steamProgress = nil
+        operationStatus = nil
         isWorking = true
         Task {
             do {
@@ -372,5 +419,14 @@ private struct BottleDetail: View {
             throw RuntimeInstaller.InstallError.runtimeNotFound
         }
         return updated
+    }
+
+    private var installButtonTitle: String {
+        if engine?.kind == .crossover {
+            return "Open CrossOver Installer"
+        }
+        return Launcher.isSteamInstalled(in: bottle)
+            ? "Reinstall Windows Steam"
+            : "Install Windows Steam"
     }
 }

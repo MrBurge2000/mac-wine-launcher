@@ -64,6 +64,13 @@ stale Wine processes, clears Steam's real per-user web cache, and launches throu
 tested Wine 10 environment. The manual black-window repair action remains available,
 but it is not required for the normal path.
 
+**Install Windows Steam** downloads a fresh copy of Valve's official installer every
+time, validates that the download is a complete Windows executable, shows download and
+installation progress, stops conflicting bottle processes, verifies that Steam was
+actually installed, and then opens it. Existing installations are labeled clearly and
+can be reinstalled from the same button. Valve's current first-launch Steam client
+updates total about 570 MB and appear in Steam's own updater window before sign-in.
+
 ## Privacy and safety
 
 Bottles live under `~/Library/Application Support/SteamBridge/Bottles`. The

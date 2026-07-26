@@ -3,6 +3,7 @@ import Foundation
 
 enum Launcher {
     static let steamInstallerURL = URL(string: "https://cdn.akamai.steamstatic.com/client/installer/SteamSetup.exe")!
+    static let minimumSteamInstallerSize = 1_000_000
     // Retained for advanced/legacy Wine installs. The managed Sikarugir runtime
     // carries its own Steam-specific CEF fixes and must launch without these flags.
     static let steamCompatibilityArguments = [
@@ -15,7 +16,11 @@ enum Launcher {
     ]
     static let silentInstallerArguments = ["/S"]
 
-    static func installSteam(in bottle: Bottle, using engine: Engine) async throws {
+    static func installSteam(
+        in bottle: Bottle,
+        using engine: Engine,
+        progress: @escaping @MainActor @Sendable (SteamInstallProgress) -> Void = { _ in }
+    ) async throws {
         if engine.kind == .crossover {
             try openEngineApp(for: engine)
             return
@@ -25,21 +30,36 @@ enum Launcher {
                 "Whisky is no longer maintained. SteamBridge Wine is the free recommended option."
             )
         }
-        let installer = FileManager.default.temporaryDirectory.appending(path: "SteamSetup.exe")
-        if !FileManager.default.fileExists(atPath: installer.path) {
-            let (temporary, response) = try await URLSession.shared.download(from: steamInstallerURL)
-            guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-                throw LaunchError.downloadFailed
-            }
-            try? FileManager.default.removeItem(at: installer)
-            try FileManager.default.moveItem(at: temporary, to: installer)
-        }
+        await progress(.init(stage: .preparing, fraction: 0.02, detail: "Stopping old Steam processes…"))
+        try stopBottleProcesses(in: bottle, using: engine)
+
+        let installer = FileManager.default.temporaryDirectory
+            .appending(path: "\(UUID().uuidString)-SteamSetup.exe")
+        defer { try? FileManager.default.removeItem(at: installer) }
+        try await downloadSteamInstaller(to: installer, progress: progress)
+        try validateSteamInstaller(at: installer)
+
+        await progress(.init(
+            stage: .installing,
+            fraction: 0.62,
+            detail: "Installing Windows Steam. This usually takes 1–3 minutes…"
+        ))
         try await runAndWait(
             engine: engine,
             bottle: bottle,
             arguments: [installer.path] + silentInstallerArguments
         )
+
+        guard isSteamInstalled(in: bottle) else {
+            throw LaunchError.steamMissingAfterInstall
+        }
+        await progress(.init(stage: .launching, fraction: 0.94, detail: "Opening Steam…"))
         try launchSteam(in: bottle, using: engine)
+        await progress(.init(
+            stage: .ready,
+            fraction: 1,
+            detail: "Steam is installed; its updater is opening"
+        ))
     }
 
     static func launchSteam(in bottle: Bottle, using engine: Engine) throws {
@@ -51,8 +71,8 @@ enum Launcher {
             NSWorkspace.shared.open(engine.executableURL)
             return
         }
-        let steamPath = "\(bottle.path)/drive_c/Program Files (x86)/Steam/steam.exe"
-        guard FileManager.default.fileExists(atPath: steamPath) else {
+        let steamPath = steamExecutableURL(in: bottle).path
+        guard isSteamInstalled(in: bottle) else {
             throw LaunchError.steamMissing
         }
         try stopBottleProcesses(in: bottle, using: engine)
@@ -94,6 +114,53 @@ enum Launcher {
             directoryHint: .isDirectory
         )
         try? FileManager.default.removeItem(at: legacyCacheURL)
+    }
+
+    static func steamExecutableURL(in bottle: Bottle) -> URL {
+        URL(fileURLWithPath: bottle.path, isDirectory: true)
+            .appending(path: "drive_c/Program Files (x86)/Steam/steam.exe")
+    }
+
+    static func isSteamInstalled(in bottle: Bottle, fileManager: FileManager = .default) -> Bool {
+        fileManager.isExecutableFile(atPath: steamExecutableURL(in: bottle).path)
+    }
+
+    static func validateSteamInstaller(at url: URL) throws {
+        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+              let size = values.fileSize,
+              size >= minimumSteamInstallerSize,
+              let handle = try? FileHandle(forReadingFrom: url) else {
+            throw LaunchError.invalidInstaller
+        }
+        defer { try? handle.close() }
+        guard (try? handle.read(upToCount: 2)) == Data([0x4d, 0x5a]) else {
+            throw LaunchError.invalidInstaller
+        }
+    }
+
+    private static func downloadSteamInstaller(
+        to destination: URL,
+        progress: @escaping @MainActor @Sendable (SteamInstallProgress) -> Void
+    ) async throws {
+        await progress(.init(
+            stage: .connecting,
+            fraction: nil,
+            detail: "Connecting to Valve’s download server. This can take up to 30 seconds…"
+        ))
+        let downloader = SteamInstallerDownloadDelegate(
+            destination: destination,
+            progress: progress
+        )
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 60
+        configuration.timeoutIntervalForResource = 300
+        let session = URLSession(
+            configuration: configuration,
+            delegate: downloader,
+            delegateQueue: nil
+        )
+        defer { session.finishTasksAndInvalidate() }
+        try await downloader.download(steamInstallerURL, using: session)
     }
 
     private static func openEngineApp(for engine: Engine) throws {
@@ -207,7 +274,9 @@ enum Launcher {
 
     enum LaunchError: LocalizedError {
         case downloadFailed
+        case invalidInstaller
         case steamMissing
+        case steamMissingAfterInstall
         case engineCouldNotOpen
         case installerFailed(Int32)
         case guiEngine(String)
@@ -215,11 +284,126 @@ enum Launcher {
         var errorDescription: String? {
             switch self {
             case .downloadFailed: "Steam’s Windows installer could not be downloaded."
+            case .invalidInstaller: "The downloaded Steam installer was incomplete or invalid. Try again."
             case .steamMissing: "Steam is not installed in this bottle yet."
+            case .steamMissingAfterInstall:
+                "The Steam installer finished, but Steam was not found. Try Install Windows Steam again."
             case .engineCouldNotOpen: "The compatibility engine could not be opened."
             case .installerFailed(let status): "The Steam installer exited with status \(status)."
             case .guiEngine(let message): message
             }
         }
+    }
+
+    struct SteamInstallProgress: Equatable, Sendable {
+        let stage: Stage
+        let fraction: Double?
+        let detail: String
+
+        enum Stage: String, Equatable, Sendable {
+            case preparing = "Preparing"
+            case connecting = "Connecting"
+            case downloading = "Downloading"
+            case installing = "Installing"
+            case launching = "Launching"
+            case ready = "Ready"
+        }
+    }
+}
+
+private final class SteamInstallerDownloadDelegate: NSObject, URLSessionDownloadDelegate,
+    @unchecked Sendable {
+    private let destination: URL
+    private let progress: @MainActor @Sendable (Launcher.SteamInstallProgress) -> Void
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, Error>?
+    private var didFinish = false
+
+    init(
+        destination: URL,
+        progress: @escaping @MainActor @Sendable (Launcher.SteamInstallProgress) -> Void
+    ) {
+        self.destination = destination
+        self.progress = progress
+    }
+
+    func download(_ url: URL, using session: URLSession) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            self.continuation = continuation
+            lock.unlock()
+            session.downloadTask(with: url).resume()
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        let hasTotal = totalBytesExpectedToWrite > 0
+        let downloadFraction = hasTotal
+            ? min(max(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite), 0), 1)
+            : nil
+        let overallFraction = downloadFraction.map { 0.05 + ($0 * 0.52) }
+        let downloaded = ByteCountFormatter.string(
+            fromByteCount: totalBytesWritten,
+            countStyle: .file
+        )
+        let detail: String
+        if hasTotal {
+            let total = ByteCountFormatter.string(
+                fromByteCount: totalBytesExpectedToWrite,
+                countStyle: .file
+            )
+            detail = "Steam installer: \(downloaded) of \(total)"
+        } else {
+            detail = "Steam installer: \(downloaded) downloaded"
+        }
+        Task { @MainActor [progress] in
+            progress(.init(stage: .downloading, fraction: overallFraction, detail: detail))
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        guard (downloadTask.response as? HTTPURLResponse)?.statusCode == 200 else {
+            finish(.failure(Launcher.LaunchError.downloadFailed))
+            return
+        }
+        do {
+            try FileManager.default.moveItem(at: location, to: destination)
+            finish(.success(()))
+        } catch {
+            finish(.failure(error))
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didCompleteWithError error: Error?
+    ) {
+        if let error {
+            finish(.failure(error))
+        }
+    }
+
+    private func finish(_ result: Result<Void, Error>) {
+        lock.lock()
+        guard !didFinish else {
+            lock.unlock()
+            return
+        }
+        didFinish = true
+        let continuation = continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(with: result)
     }
 }
