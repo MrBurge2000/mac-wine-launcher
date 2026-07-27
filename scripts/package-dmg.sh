@@ -15,7 +15,9 @@ TEMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/steambridge-dmg.XXXXXX")
 STAGE="$TEMP_ROOT/stage"
 RW_DMG="$TEMP_ROOT/SteamBridge-rw.dmg"
 OUTPUT_DMG="$PROJECT_ROOT/dist/SteamBridge.dmg"
-VOLUME_NAME="SteamBridge 0.5.0"
+APP_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" \
+    "$PROJECT_ROOT/Resources/Info.plist")
+VOLUME_NAME="SteamBridge $APP_VERSION"
 MOUNT_POINT=""
 
 cleanup() {

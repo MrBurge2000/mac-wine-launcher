@@ -2,6 +2,18 @@ import AppKit
 import Foundation
 
 enum Launcher {
+    enum WineICUArchitecture: Equatable {
+        case x86_64
+        case x86
+
+        var runtimeFolderName: String {
+            switch self {
+            case .x86_64: "x86_64"
+            case .x86: "x86"
+            }
+        }
+    }
+
     static let steamInstallerURL = URL(string: "https://cdn.akamai.steamstatic.com/client/installer/SteamSetup.exe")!
     static let minimumSteamInstallerSize = 1_000_000
     static let dontPanicExecutableName = "Don't Panic! It is Just Turbulence.exe"
@@ -82,8 +94,8 @@ enum Launcher {
         guard isSteamInstalled(in: bottle) else {
             throw LaunchError.steamMissing
         }
-        try installManagedWindowsComponentsIfNeeded(in: bottle, using: engine)
         try stopBottleProcesses(in: bottle, using: engine)
+        try repairSteamIntegrity(in: bottle, using: engine)
         if let displayProfile {
             try applyDisplayProfile(displayProfile, in: bottle, using: engine)
         }
@@ -184,7 +196,11 @@ enum Launcher {
         ), !isDirectory.boolValue else {
             throw LaunchError.windowsApplicationMissing
         }
-        try installManagedWindowsComponentsIfNeeded(in: bottle, using: engine)
+        try removeLegacyGlobalWineICUIfNeeded(in: bottle, using: engine)
+        try installManagedWindowsComponentsIfNeeded(
+            for: applicationURL,
+            using: engine
+        )
         if let displayProfile {
             try applyDisplayProfile(displayProfile, in: bottle, using: engine)
         }
@@ -241,53 +257,218 @@ enum Launcher {
 
     static func installWineICU(
         from sourceRoot: URL,
-        intoBottleAt bottleRoot: URL,
+        architecture: WineICUArchitecture,
+        into destination: URL,
         fileManager: FileManager = .default
     ) throws {
-        let mappings = [
-            ("x86_64", "system32"),
-            ("x86", "syswow64")
+        let source = sourceRoot.appending(
+            path: architecture.runtimeFolderName,
+            directoryHint: .isDirectory
+        )
+        let requiredFiles = ["icuuc72.dll", "icuin72.dll", "icudt72.dll"]
+        guard requiredFiles.allSatisfy({
+            fileManager.fileExists(atPath: source.appending(path: $0).path)
+        }) else {
+            throw LaunchError.windowsComponentsMissing
+        }
+        try fileManager.createDirectory(
+            at: destination,
+            withIntermediateDirectories: true
+        )
+        for fileName in requiredFiles {
+            try copyIfMissing(
+                source.appending(path: fileName),
+                to: destination.appending(path: fileName),
+                fileManager: fileManager
+            )
+        }
+        try copyIfMissing(
+            source.appending(path: "icuuc72.dll"),
+            to: destination.appending(path: "icuuc.dll"),
+            fileManager: fileManager
+        )
+        try copyIfMissing(
+            source.appending(path: "icuin72.dll"),
+            to: destination.appending(path: "icuin.dll"),
+            fileManager: fileManager
+        )
+    }
+
+    private static func installManagedWindowsComponentsIfNeeded(
+        for applicationURL: URL,
+        using engine: Engine,
+        fileManager: FileManager = .default
+    ) throws {
+        guard RuntimeInstaller.isCurrentRuntime(engine, fileManager: fileManager),
+              let qtBinaryDirectory = packagedQtBinaryDirectory(
+                for: applicationURL,
+                fileManager: fileManager
+              ),
+              let architecture = wineICUArchitecture(
+                of: qtBinaryDirectory.appending(path: "Qt6Core.dll")
+              ) else {
+            return
+        }
+        try installWineICU(
+            from: RuntimeInstaller.wineICURoot(fileManager: fileManager),
+            architecture: architecture,
+            into: qtBinaryDirectory,
+            fileManager: fileManager
+        )
+    }
+
+    static func packagedQtBinaryDirectory(
+        for applicationURL: URL,
+        fileManager: FileManager = .default
+    ) -> URL? {
+        let applicationFolder = applicationURL.deletingLastPathComponent()
+        let candidates = [
+            "_internal/PyQt6/Qt6/bin",
+            "_internal/PySide6/Qt/bin"
         ]
-        for (architecture, systemDirectory) in mappings {
-            let source = sourceRoot.appending(
-                path: architecture,
-                directoryHint: .isDirectory
-            )
-            let destination = bottleRoot.appending(
-                path: "drive_c/windows/\(systemDirectory)",
-                directoryHint: .isDirectory
-            )
-            let requiredFiles = ["icuuc72.dll", "icuin72.dll", "icudt72.dll"]
-            guard requiredFiles.allSatisfy({
-                fileManager.fileExists(atPath: source.appending(path: $0).path)
-            }) else {
-                throw LaunchError.windowsComponentsMissing
-            }
-            try fileManager.createDirectory(
-                at: destination,
-                withIntermediateDirectories: true
-            )
-            for fileName in requiredFiles {
-                try copyIfMissing(
-                    source.appending(path: fileName),
-                    to: destination.appending(path: fileName),
-                    fileManager: fileManager
+        return candidates
+            .map { applicationFolder.appending(path: $0, directoryHint: .isDirectory) }
+            .first {
+                fileManager.fileExists(
+                    atPath: $0.appending(path: "Qt6Core.dll").path
                 )
             }
-            try copyIfMissing(
-                source.appending(path: "icuuc72.dll"),
-                to: destination.appending(path: "icuuc.dll"),
-                fileManager: fileManager
+    }
+
+    static func wineICUArchitecture(of executable: URL) -> WineICUArchitecture? {
+        guard let data = try? Data(contentsOf: executable, options: .mappedIfSafe),
+              data.count >= 64,
+              data[0] == 0x4d,
+              data[1] == 0x5a else {
+            return nil
+        }
+        let peOffset = data.withUnsafeBytes {
+            Int(UInt32(littleEndian: $0.loadUnaligned(
+                fromByteOffset: 0x3c,
+                as: UInt32.self
+            )))
+        }
+        guard peOffset >= 0,
+              peOffset + 6 <= data.count,
+              data[peOffset] == 0x50,
+              data[peOffset + 1] == 0x45,
+              data[peOffset + 2] == 0,
+              data[peOffset + 3] == 0 else {
+            return nil
+        }
+        let machine = data.withUnsafeBytes {
+            UInt16(littleEndian: $0.loadUnaligned(
+                fromByteOffset: peOffset + 4,
+                as: UInt16.self
+            ))
+        }
+        switch machine {
+        case 0x8664:
+            return .x86_64
+        case 0x014c:
+            return .x86
+        default:
+            return nil
+        }
+    }
+
+    static func repairSteamIntegrity(
+        in bottle: Bottle,
+        using engine: Engine,
+        fileManager: FileManager = .default
+    ) throws {
+        try removeLegacyGlobalWineICUIfNeeded(
+            in: bottle,
+            using: engine,
+            fileManager: fileManager
+        )
+        let steamDirectory = steamExecutableURL(in: bottle)
+            .deletingLastPathComponent()
+        try removeSteamUpdateInhibitor(
+            in: steamDirectory,
+            fileManager: fileManager
+        )
+        try restoreNewerSteamBootstrapBackup(
+            in: steamDirectory,
+            fileManager: fileManager
+        )
+    }
+
+    static func removeSteamUpdateInhibitor(
+        in steamDirectory: URL,
+        fileManager: FileManager = .default
+    ) throws {
+        let configuration = steamDirectory.appending(path: "steam.cfg")
+        guard let contents = try? String(contentsOf: configuration, encoding: .utf8) else {
+            return
+        }
+        let retainedLines = contents
+            .components(separatedBy: .newlines)
+            .filter {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased() != "bootstrapperinhibitall=enable"
+            }
+        guard retainedLines.count != contents.components(separatedBy: .newlines).count else {
+            return
+        }
+        let remaining = retainedLines
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if remaining.isEmpty {
+            try fileManager.moveItem(
+                at: configuration,
+                to: availableQuarantineURL(
+                    for: configuration,
+                    suffix: "disabled-by-steambridge",
+                    fileManager: fileManager
+                )
             )
-            try copyIfMissing(
-                source.appending(path: "icuin72.dll"),
-                to: destination.appending(path: "icuin.dll"),
-                fileManager: fileManager
+        } else {
+            try (remaining.joined(separator: "\n") + "\n").write(
+                to: configuration,
+                atomically: true,
+                encoding: .utf8
             )
         }
     }
 
-    private static func installManagedWindowsComponentsIfNeeded(
+    static func restoreNewerSteamBootstrapBackup(
+        in steamDirectory: URL,
+        fileManager: FileManager = .default
+    ) throws {
+        let current = steamDirectory.appending(path: "steam.exe")
+        let backup = steamDirectory.appending(path: "steam.exe.old")
+        guard fileManager.fileExists(atPath: current.path),
+              fileManager.fileExists(atPath: backup.path),
+              let currentDate = try? current.resourceValues(
+                forKeys: [.contentModificationDateKey]
+              ).contentModificationDate,
+              let backupDate = try? backup.resourceValues(
+                forKeys: [.contentModificationDateKey]
+              ).contentModificationDate,
+              backupDate > currentDate,
+              wineICUArchitecture(of: current) == .x86,
+              wineICUArchitecture(of: backup) == .x86 else {
+            return
+        }
+        let quarantine = availableQuarantineURL(
+            for: current,
+            suffix: "replaced-by-steambridge",
+            fileManager: fileManager
+        )
+        try fileManager.moveItem(at: current, to: quarantine)
+        do {
+            try fileManager.copyItem(at: backup, to: current)
+            try fileManager.setAttributes(
+                [.posixPermissions: 0o755],
+                ofItemAtPath: current.path
+            )
+        } catch {
+            try? fileManager.moveItem(at: quarantine, to: current)
+            throw error
+        }
+    }
+
+    private static func removeLegacyGlobalWineICUIfNeeded(
         in bottle: Bottle,
         using engine: Engine,
         fileManager: FileManager = .default
@@ -295,11 +476,58 @@ enum Launcher {
         guard RuntimeInstaller.isCurrentRuntime(engine, fileManager: fileManager) else {
             return
         }
-        try installWineICU(
-            from: RuntimeInstaller.wineICURoot(fileManager: fileManager),
-            intoBottleAt: URL(fileURLWithPath: bottle.path, isDirectory: true),
-            fileManager: fileManager
-        )
+        let sourceRoot = RuntimeInstaller.wineICURoot(fileManager: fileManager)
+        let bottleRoot = URL(fileURLWithPath: bottle.path, isDirectory: true)
+        let mappings: [(WineICUArchitecture, String)] = [
+            (.x86_64, "system32"),
+            (.x86, "syswow64")
+        ]
+        let files = [
+            ("icuuc72.dll", "icuuc72.dll"),
+            ("icuin72.dll", "icuin72.dll"),
+            ("icudt72.dll", "icudt72.dll"),
+            ("icuuc72.dll", "icuuc.dll"),
+            ("icuin72.dll", "icuin.dll")
+        ]
+        for (architecture, systemDirectory) in mappings {
+            let source = sourceRoot.appending(
+                path: architecture.runtimeFolderName,
+                directoryHint: .isDirectory
+            )
+            let destination = bottleRoot.appending(
+                path: "drive_c/windows/\(systemDirectory)",
+                directoryHint: .isDirectory
+            )
+            for (sourceName, destinationName) in files {
+                let sourceFile = source.appending(path: sourceName)
+                let destinationFile = destination.appending(path: destinationName)
+                guard fileManager.fileExists(atPath: sourceFile.path),
+                      fileManager.fileExists(atPath: destinationFile.path),
+                      fileManager.contentsEqual(
+                        atPath: sourceFile.path,
+                        andPath: destinationFile.path
+                      ) else {
+                    continue
+                }
+                try fileManager.removeItem(at: destinationFile)
+            }
+        }
+    }
+
+    private static func availableQuarantineURL(
+        for item: URL,
+        suffix: String,
+        fileManager: FileManager
+    ) -> URL {
+        let base = item.appendingPathExtension(suffix)
+        guard fileManager.fileExists(atPath: base.path) else { return base }
+        var number = 2
+        while fileManager.fileExists(
+            atPath: base.appendingPathExtension(String(number)).path
+        ) {
+            number += 1
+        }
+        return base.appendingPathExtension(String(number))
     }
 
     private static func copyIfMissing(

@@ -101,11 +101,11 @@ import Testing
     #expect(arguments == ["cmd", "/c", url.path])
 }
 
-@Test func wineICUInstallsForBothWindowsArchitecturesWithoutOverwriting() throws {
+@Test func wineICUInstallsOnlyBesideTheDetectedQtRuntimeWithoutOverwriting() throws {
     let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
     let source = root.appending(path: "WineICU", directoryHint: .isDirectory)
-    let bottle = root.appending(path: "Bottle", directoryHint: .isDirectory)
+    let destination = root.appending(path: "App/_internal/PyQt6/Qt6/bin")
     for architecture in ["x86_64", "x86"] {
         let directory = source.appending(path: architecture, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(
@@ -118,27 +118,78 @@ import Testing
             )
         }
     }
-    let existing = bottle.appending(path: "drive_c/windows/system32/icuuc.dll")
+    let existing = destination.appending(path: "icuuc.dll")
     try FileManager.default.createDirectory(
         at: existing.deletingLastPathComponent(),
         withIntermediateDirectories: true
     )
     try Data("keep-existing".utf8).write(to: existing)
 
-    try Launcher.installWineICU(from: source, intoBottleAt: bottle)
+    try Launcher.installWineICU(
+        from: source,
+        architecture: .x86_64,
+        into: destination
+    )
 
     #expect(try String(contentsOf: existing, encoding: .utf8) == "keep-existing")
     #expect(FileManager.default.fileExists(
-        atPath: bottle.appending(path: "drive_c/windows/system32/icudt72.dll").path
+        atPath: destination.appending(path: "icudt72.dll").path
     ))
     #expect(FileManager.default.fileExists(
-        atPath: bottle.appending(path: "drive_c/windows/system32/icuin.dll").path
+        atPath: destination.appending(path: "icuin.dll").path
     ))
+    #expect(try String(
+        contentsOf: destination.appending(path: "icuuc72.dll"),
+        encoding: .utf8
+    ) == "x86_64-icuuc72.dll")
+}
+
+@Test func qtRuntimeArchitectureIsReadFromPEHeader() throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let x64 = root.appending(path: "Qt6Core-x64.dll")
+    let x86 = root.appending(path: "Qt6Core-x86.dll")
+    try peStub(machine: 0x8664).write(to: x64)
+    try peStub(machine: 0x014c).write(to: x86)
+
+    #expect(Launcher.wineICUArchitecture(of: x64) == .x86_64)
+    #expect(Launcher.wineICUArchitecture(of: x86) == .x86)
+}
+
+@Test func steamIntegrityRepairUnblocksUpdatesAndRestoresNewerBootstrap() throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let steam = root.appending(path: "Steam", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: steam, withIntermediateDirectories: true)
+    let current = steam.appending(path: "steam.exe")
+    let backup = steam.appending(path: "steam.exe.old")
+    try peStub(machine: 0x014c, marker: 1).write(to: current)
+    try peStub(machine: 0x014c, marker: 2).write(to: backup)
+    try FileManager.default.setAttributes(
+        [.modificationDate: Date(timeIntervalSince1970: 100)],
+        ofItemAtPath: current.path
+    )
+    try FileManager.default.setAttributes(
+        [.modificationDate: Date(timeIntervalSince1970: 200)],
+        ofItemAtPath: backup.path
+    )
+    try "BootStrapperInhibitAll=Enable\r\n".write(
+        to: steam.appending(path: "steam.cfg"),
+        atomically: true,
+        encoding: .utf8
+    )
+
+    try Launcher.removeSteamUpdateInhibitor(in: steam)
+    try Launcher.restoreNewerSteamBootstrapBackup(in: steam)
+
+    #expect(!FileManager.default.fileExists(atPath: steam.appending(path: "steam.cfg").path))
     #expect(FileManager.default.fileExists(
-        atPath: bottle.appending(path: "drive_c/windows/syswow64/icuuc.dll").path
+        atPath: steam.appending(path: "steam.cfg.disabled-by-steambridge").path
     ))
+    #expect(try Data(contentsOf: current).last == 2)
     #expect(FileManager.default.fileExists(
-        atPath: bottle.appending(path: "drive_c/windows/syswow64/icudt72.dll").path
+        atPath: steam.appending(path: "steam.exe.replaced-by-steambridge").path
     ))
 }
 
@@ -174,6 +225,22 @@ import Testing
         for: application,
         baseEnvironment: environment
     ) == environment)
+}
+
+private func peStub(machine: UInt16, marker: UInt8 = 0) -> Data {
+    var data = Data(repeating: 0, count: 128)
+    data[0] = 0x4d
+    data[1] = 0x5a
+    var offset = UInt32(64).littleEndian
+    withUnsafeBytes(of: &offset) { data.replaceSubrange(0x3c..<0x40, with: $0) }
+    data[64] = 0x50
+    data[65] = 0x45
+    var encodedMachine = machine.littleEndian
+    withUnsafeBytes(of: &encodedMachine) {
+        data.replaceSubrange(68..<70, with: $0)
+    }
+    data[data.count - 1] = marker
+    return data
 }
 
 @Test func unsupportedWindowsApplicationIsRejected() {
