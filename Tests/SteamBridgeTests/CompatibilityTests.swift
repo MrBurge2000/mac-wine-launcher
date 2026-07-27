@@ -77,6 +77,50 @@ import Testing
     #expect(Launcher.silentInstallerArguments == ["/S"])
 }
 
+@Test func windowsExecutableLaunchesDirectlyWithArguments() throws {
+    let url = URL(fileURLWithPath: "/Applications/Example App.exe")
+    let arguments = try Launcher.windowsApplicationArguments(
+        for: url,
+        additionalArguments: ["--safe-mode", "My File"]
+    )
+    #expect(arguments == [url.path, "--safe-mode", "My File"])
+}
+
+@Test func windowsInstallerUsesMSIExec() throws {
+    let url = URL(fileURLWithPath: "/Downloads/Example.msi")
+    let arguments = try Launcher.windowsApplicationArguments(for: url)
+    #expect(arguments == ["msiexec", "/i", url.path])
+}
+
+@Test func windowsBatchScriptUsesCommandInterpreter() throws {
+    let url = URL(fileURLWithPath: "/Downloads/setup.cmd")
+    let arguments = try Launcher.windowsApplicationArguments(for: url)
+    #expect(arguments == ["cmd", "/c", url.path])
+}
+
+@Test func unsupportedWindowsApplicationIsRejected() {
+    #expect(throws: Launcher.LaunchError.self) {
+        try Launcher.windowsApplicationArguments(
+            for: URL(fileURLWithPath: "/Downloads/archive.zip")
+        )
+    }
+}
+
+@Test func quotedWindowsArgumentsAreParsedWithoutShellExecution() throws {
+    let arguments = try WindowsCommandLine.parse(
+        #"--safe-mode "My File.txt" 'second value' C:\Games\Save"#
+    )
+    #expect(arguments == [
+        "--safe-mode", "My File.txt", "second value", #"C:\Games\Save"#
+    ])
+}
+
+@Test func unclosedWindowsArgumentQuoteIsRejected() {
+    #expect(throws: WindowsCommandLine.ParseError.self) {
+        try WindowsCommandLine.parse(#""unfinished"#)
+    }
+}
+
 @Test func managedRuntimeFindsAndActivatesD3DMetal() throws {
     let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }

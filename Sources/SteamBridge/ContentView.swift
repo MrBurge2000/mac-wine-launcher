@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @StateObject private var store = BottleStore()
@@ -189,6 +190,8 @@ private struct BottleDetail: View {
     @State private var graphicsBackend: GraphicsBackend = .automatic
     @State private var displayProfile: DisplayProfile = .retinaRecommended
     @State private var mouseCaptureProfile: MouseCaptureProfile = .menuSafe
+    @State private var windowsArguments = ""
+    @State private var recentWindowsApplications: [RecentWindowsApplication] = []
 
     var body: some View {
         Form {
@@ -269,6 +272,65 @@ private struct BottleDetail: View {
                     Text("Closes Steam, clears its web-interface cache, and relaunches with software-rendered UI.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Windows Apps") {
+                HStack {
+                    Button("Run Windows App or Installer…") {
+                        chooseWindowsApplication()
+                    }
+                    .disabled(
+                        engine == nil ||
+                            isWorking ||
+                            engine?.kind == .crossover ||
+                            engine?.kind == .whisky
+                    )
+                    Button("Open C: Drive") {
+                        NSWorkspace.shared.open(
+                            URL(fileURLWithPath: bottle.path, isDirectory: true)
+                                .appending(path: "drive_c", directoryHint: .isDirectory)
+                        )
+                    }
+                }
+                TextField(
+                    "Optional launch arguments, e.g. --safe-mode \"My File\"",
+                    text: $windowsArguments
+                )
+                Text("Choose a Windows .exe, .msi, .com, .bat, or .cmd file. It launches inside this bottle using \(resolvedGraphicsBackend.title); installers automatically run through Windows Installer.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if !recentWindowsApplications.isEmpty {
+                    LabeledContent("Recent") {
+                        Button("Clear") {
+                            recentWindowsApplications = []
+                            saveRecentWindowsApplications()
+                        }
+                        .buttonStyle(.link)
+                    }
+                    ForEach(recentWindowsApplications.prefix(5)) { application in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(application.displayName)
+                                Text(application.path)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            Spacer()
+                            Button("Run") {
+                                runWindowsApplication(
+                                    at: URL(fileURLWithPath: application.path)
+                                )
+                            }
+                            .disabled(
+                                isWorking ||
+                                    !FileManager.default.fileExists(atPath: application.path)
+                            )
+                        }
+                    }
                 }
             }
 
@@ -407,6 +469,7 @@ private struct BottleDetail: View {
                let profile = MouseCaptureProfile(rawValue: saved) {
                 mouseCaptureProfile = profile
             }
+            loadRecentWindowsApplications()
         }
         .onChange(of: graphicsBackend) { _, newValue in
             UserDefaults.standard.set(newValue.rawValue, forKey: graphicsPreferenceKey)
@@ -486,6 +549,75 @@ private struct BottleDetail: View {
             runtimeProgress = nil
             isWorking = false
         }
+    }
+
+    private func chooseWindowsApplication() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose a Windows App or Installer"
+        panel.prompt = "Run with Wine"
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = Launcher.supportedWindowsApplicationExtensions
+            .compactMap { UTType(filenameExtension: $0) }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        runWindowsApplication(at: url)
+    }
+
+    private func runWindowsApplication(at url: URL) {
+        guard engine != nil else { return }
+        operationStatus = "Opening \(url.lastPathComponent)…"
+        isWorking = true
+        Task {
+            do {
+                let arguments = try WindowsCommandLine.parse(windowsArguments)
+                let readyEngine = try await prepareEngine()
+                try Launcher.launchWindowsApplication(
+                    at: url,
+                    arguments: arguments,
+                    in: bottle,
+                    using: readyEngine,
+                    graphicsBackend: graphicsBackend,
+                    displayProfile: displayProfile
+                )
+                rememberWindowsApplication(url)
+                operationStatus =
+                    "\(url.lastPathComponent) is opening with \(resolvedGraphicsBackend.title)."
+            } catch {
+                operationStatus = nil
+                report(error.localizedDescription)
+            }
+            runtimeProgress = nil
+            isWorking = false
+        }
+    }
+
+    private func rememberWindowsApplication(_ url: URL) {
+        recentWindowsApplications.removeAll { $0.path == url.path }
+        recentWindowsApplications.insert(
+            .init(path: url.path, lastLaunchedAt: Date()),
+            at: 0
+        )
+        recentWindowsApplications = Array(recentWindowsApplications.prefix(10))
+        saveRecentWindowsApplications()
+    }
+
+    private func loadRecentWindowsApplications() {
+        guard let data = UserDefaults.standard.data(forKey: recentApplicationsKey),
+              let applications = try? JSONDecoder().decode(
+                [RecentWindowsApplication].self,
+                from: data
+              ) else {
+            recentWindowsApplications = []
+            return
+        }
+        recentWindowsApplications = applications.sorted {
+            $0.lastLaunchedAt > $1.lastLaunchedAt
+        }
+    }
+
+    private func saveRecentWindowsApplications() {
+        let data = try? JSONEncoder().encode(recentWindowsApplications)
+        UserDefaults.standard.set(data, forKey: recentApplicationsKey)
     }
 
     private func repairSteam() {
@@ -590,6 +722,10 @@ private struct BottleDetail: View {
 
     private var inputPreferenceKey: String {
         "mouseCaptureProfile.\(bottle.id.uuidString)"
+    }
+
+    private var recentApplicationsKey: String {
+        "recentWindowsApplications.\(bottle.id.uuidString)"
     }
 
     private var retinaResolutionSummary: String? {

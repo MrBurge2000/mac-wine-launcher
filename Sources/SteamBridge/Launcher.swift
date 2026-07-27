@@ -136,6 +136,70 @@ enum Launcher {
         )
     }
 
+    static let supportedWindowsApplicationExtensions = Set([
+        "exe", "msi", "com", "bat", "cmd"
+    ])
+
+    static func windowsApplicationArguments(
+        for applicationURL: URL,
+        additionalArguments: [String] = []
+    ) throws -> [String] {
+        let fileExtension = applicationURL.pathExtension.lowercased()
+        guard supportedWindowsApplicationExtensions.contains(fileExtension) else {
+            throw LaunchError.unsupportedWindowsApplication
+        }
+        switch fileExtension {
+        case "msi":
+            return ["msiexec", "/i", applicationURL.path] + additionalArguments
+        case "bat", "cmd":
+            return ["cmd", "/c", applicationURL.path] + additionalArguments
+        default:
+            return [applicationURL.path] + additionalArguments
+        }
+    }
+
+    static func launchWindowsApplication(
+        at applicationURL: URL,
+        arguments: [String] = [],
+        in bottle: Bottle,
+        using engine: Engine,
+        graphicsBackend: GraphicsBackend = .automatic,
+        displayProfile: DisplayProfile? = nil
+    ) throws {
+        guard engine.kind != .crossover else {
+            throw LaunchError.guiEngine(
+                "Direct app launching is available with SteamBridge Wine or system Wine. Open CrossOver to run this file in a CrossOver bottle."
+            )
+        }
+        guard engine.kind != .whisky else {
+            throw LaunchError.guiEngine(
+                "Whisky is no longer maintained. Use SteamBridge Wine for direct Windows app launching."
+            )
+        }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(
+            atPath: applicationURL.path,
+            isDirectory: &isDirectory
+        ), !isDirectory.boolValue else {
+            throw LaunchError.windowsApplicationMissing
+        }
+        if let displayProfile {
+            try applyDisplayProfile(displayProfile, in: bottle, using: engine)
+        }
+
+        let process = configuredProcess(
+            engine: engine,
+            bottle: bottle,
+            arguments: try windowsApplicationArguments(
+                for: applicationURL,
+                additionalArguments: arguments
+            ),
+            graphicsBackend: graphicsBackend
+        )
+        process.currentDirectoryURL = applicationURL.deletingLastPathComponent()
+        try process.run()
+    }
+
     static func clearSteamWebCaches(in bottle: Bottle) {
         let prefixURL = URL(fileURLWithPath: bottle.path, isDirectory: true)
         let usersURL = prefixURL.appending(path: "drive_c/users", directoryHint: .isDirectory)
@@ -557,6 +621,8 @@ enum Launcher {
         case installerFailed(Int32)
         case displayConfigurationFailed(Int32)
         case inputConfigurationFailed(Int32)
+        case unsupportedWindowsApplication
+        case windowsApplicationMissing
         case guiEngine(String)
 
         var errorDescription: String? {
@@ -572,6 +638,10 @@ enum Launcher {
                 "The Retina and Windows scaling settings could not be applied (status \(status))."
             case .inputConfigurationFailed(let status):
                 "The game-specific mouse settings could not be applied (status \(status))."
+            case .unsupportedWindowsApplication:
+                "Choose a Windows .exe, .msi, .com, .bat, or .cmd file."
+            case .windowsApplicationMissing:
+                "The selected Windows application no longer exists at that location."
             case .guiEngine(let message): message
             }
         }

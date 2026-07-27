@@ -1,8 +1,9 @@
 # SteamBridge
 
-SteamBridge is a macOS launcher for running the Windows version of Steam through an
-installed compatibility engine. It can download and manage its own free Wine runtime,
-create isolated bottles, install Windows Steam, and launch it without CrossOver.
+SteamBridge is a macOS launcher for Windows apps and the Windows version of Steam
+through an installed compatibility engine. It can download and manage its own free
+Wine runtime, create isolated bottles, launch EXE/MSI applications and installers,
+install Windows Steam, and launch it without CrossOver.
 
 ## What it is (and is not)
 
@@ -61,6 +62,12 @@ alternate DirectX 10/11 paths, D9VK accelerates many DirectX 9 games, and WineD3
 the conservative fallback. SteamBridge also enables Rosetta's AVX advertisement on
 supported macOS versions. Games launched from a Steam session inherit the selected
 graphics mode.
+
+The **Windows Apps** section launches `.exe`, `.msi`, `.com`, `.bat`, and `.cmd`
+files directly through Wine. MSI packages use Windows Installer automatically, quoted
+launch arguments are parsed without a shell, each app starts from its own folder, and
+recent apps are remembered separately for each bottle. The selected graphics backend
+is shared with directly launched apps.
 
 Per-bottle display profiles control Wine's macOS Retina mode and Windows DPI. The
 recommended Retina profile renders Steam at 2× resolution with 200% Windows scaling,

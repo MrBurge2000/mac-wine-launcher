@@ -49,6 +49,87 @@ struct Bottle: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+struct RecentWindowsApplication: Identifiable, Codable, Equatable, Sendable {
+    var path: String
+    var lastLaunchedAt: Date
+
+    var id: String { path }
+
+    var displayName: String {
+        URL(fileURLWithPath: path).lastPathComponent
+    }
+}
+
+enum WindowsCommandLine {
+    static func parse(_ commandLine: String) throws -> [String] {
+        var arguments: [String] = []
+        var current = ""
+        var quote: Character?
+        var hasToken = false
+        let characters = Array(commandLine)
+        var index = 0
+
+        while index < characters.count {
+            let character = characters[index]
+            if character == "\\" {
+                if index + 1 < characters.count {
+                    let next = characters[index + 1]
+                    if next == quote || (quote == nil && (next == "\"" || next == "'")) {
+                        current.append(next)
+                        index += 2
+                        hasToken = true
+                        continue
+                    }
+                }
+                current.append(character)
+                hasToken = true
+                index += 1
+                continue
+            }
+            if let activeQuote = quote {
+                if character == activeQuote {
+                    quote = nil
+                } else {
+                    current.append(character)
+                }
+                hasToken = true
+                index += 1
+                continue
+            }
+            if character == "\"" || character == "'" {
+                quote = character
+                hasToken = true
+            } else if character.isWhitespace {
+                if hasToken {
+                    arguments.append(current)
+                    current = ""
+                    hasToken = false
+                }
+            } else {
+                current.append(character)
+                hasToken = true
+            }
+            index += 1
+        }
+
+        guard quote == nil else {
+            throw ParseError.unclosedQuote
+        }
+        if hasToken {
+            arguments.append(current)
+        }
+        return arguments
+    }
+
+    enum ParseError: LocalizedError {
+        case unclosedQuote
+
+        var errorDescription: String? {
+            "The launch arguments contain an unclosed quote."
+        }
+    }
+}
+
 enum CompatibilityRating: String, Codable, Sendable {
     case unknown = "Unknown"
     case likely = "Likely"
