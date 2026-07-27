@@ -2,9 +2,11 @@ import CryptoKit
 import Foundation
 
 enum RuntimeInstaller {
-    static let currentVersion = "WS12WineSikarugir10.0_6+Template-1.0.11"
+    static let currentVersion = "WS12WineSikarugir10.0_6+Template-1.0.11+WineICU-72.1"
     static let runtimeFolderName = "Sikarugir"
     static let versionFileName = ".steambridge-runtime-version"
+    static let wineICUVersion = "72.1"
+    static let wineICUFolderName = "WineICU"
 
     static let engineAsset = Asset(
         name: "WS12WineSikarugir10.0_6.tar.xz",
@@ -22,6 +24,22 @@ enum RuntimeInstaller {
         sha256: "9fa15479e7ff6abd99c1d07be285fb95f41fc6991586502427152b1f7d6ccb8a"
     )
 
+    static let wineICUX64Asset = Asset(
+        name: "wine-icu-72.1-x86_64-artifacts.zip",
+        browserDownloadURL: URL(
+            string: "https://gitlab.winehq.org/wine/wine-icu/-/jobs/artifacts/65cb37fe5d8eb867a3968a333e728fb1f7a918f7/download?job=build-zip-x86_64"
+        )!,
+        sha256: "22b1d21f8dc863810cf823f31fa0fa664c734e97604b059a41e1cfd6121e0209"
+    )
+
+    static let wineICUX86Asset = Asset(
+        name: "wine-icu-72.1-x86-artifacts.zip",
+        browserDownloadURL: URL(
+            string: "https://gitlab.winehq.org/wine/wine-icu/-/jobs/artifacts/65cb37fe5d8eb867a3968a333e728fb1f7a918f7/download?job=build-zip-x86"
+        )!,
+        sha256: "cdcbe53812d15637bf4a501cf248e41e47f753d4488d3ba8a49553421664a1a7"
+    )
+
     static func install(
         fileManager: FileManager = .default,
         progress: @escaping @MainActor @Sendable (InstallProgress) -> Void = { _ in }
@@ -31,6 +49,26 @@ enum RuntimeInstaller {
 
         if isCurrentRuntimeInstalled(fileManager: fileManager) {
             await progress(.init(stage: .ready, fraction: 1, detail: "Gaming runtime is already current"))
+            return
+        }
+
+        let installedRoot = currentRuntimeRoot(fileManager: fileManager)
+        if hasCoreRuntimeFiles(at: installedRoot, fileManager: fileManager) {
+            try await installWineICU(
+                into: installedRoot,
+                fileManager: fileManager,
+                fractionRange: 0.03...0.96,
+                progress: progress
+            )
+            try writeVersionMarker(in: installedRoot)
+            guard isCurrentRuntimeInstalled(fileManager: fileManager) else {
+                throw InstallError.runtimeNotFound
+            }
+            await progress(.init(
+                stage: .ready,
+                fraction: 1,
+                detail: "Windows app compatibility components ready"
+            ))
             return
         }
 
@@ -102,12 +140,15 @@ enum RuntimeInstaller {
             at: frameworks,
             to: assembled.appending(path: "Frameworks", directoryHint: .isDirectory)
         )
-        try Data((currentVersion + "\n").utf8).write(
-            to: assembled.appending(path: versionFileName),
-            options: .atomic
+        try await installWineICU(
+            into: assembled,
+            fileManager: fileManager,
+            fractionRange: 0.945...0.985,
+            progress: progress
         )
+        try writeVersionMarker(in: assembled)
 
-        await progress(.init(stage: .installing, fraction: 0.98, detail: "Activating the new runtime…"))
+        await progress(.init(stage: .installing, fraction: 0.99, detail: "Activating the new runtime…"))
         try replaceRuntime(with: assembled, in: root, fileManager: fileManager)
 
         guard isCurrentRuntimeInstalled(fileManager: fileManager) else {
@@ -129,7 +170,8 @@ enum RuntimeInstaller {
     static func isCurrentRuntimeInstalled(fileManager: FileManager = .default) -> Bool {
         let root = currentRuntimeRoot(fileManager: fileManager)
         let marker = root.appending(path: versionFileName)
-        guard fileManager.isExecutableFile(atPath: currentRuntimeExecutable(fileManager: fileManager).path),
+        guard hasCoreRuntimeFiles(at: root, fileManager: fileManager),
+              isWineICUInstalled(at: root, fileManager: fileManager),
               let value = try? String(contentsOf: marker, encoding: .utf8) else {
             return false
         }
@@ -140,6 +182,31 @@ enum RuntimeInstaller {
         guard engine.kind == .steamBridge else { return false }
         return engine.executableURL.standardizedFileURL.path ==
             currentRuntimeExecutable(fileManager: fileManager).standardizedFileURL.path
+    }
+
+    static func wineICURoot(fileManager: FileManager = .default) -> URL {
+        currentRuntimeRoot(fileManager: fileManager)
+            .appending(path: "Compatibility/\(wineICUFolderName)", directoryHint: .isDirectory)
+    }
+
+    static func isWineICUInstalled(
+        at runtimeRoot: URL? = nil,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        let root = (runtimeRoot ?? currentRuntimeRoot(fileManager: fileManager))
+            .appending(path: "Compatibility/\(wineICUFolderName)", directoryHint: .isDirectory)
+        guard let marker = try? String(
+            contentsOf: root.appending(path: "VERSION"),
+            encoding: .utf8
+        ), marker.trimmingCharacters(in: .whitespacesAndNewlines) == wineICUVersion else {
+            return false
+        }
+        return ["x86_64", "x86"].allSatisfy { architecture in
+            let directory = root.appending(path: architecture, directoryHint: .isDirectory)
+            return ["icuuc72.dll", "icuin72.dll", "icudt72.dll"].allSatisfy {
+                fileManager.fileExists(atPath: directory.appending(path: $0).path)
+            }
+        }
     }
 
     private static func download(
@@ -190,6 +257,155 @@ enum RuntimeInstaller {
                 throw InstallError.extractionFailed
             }
         }.value
+    }
+
+    private static func extractZip(_ archive: URL, to destination: URL) async throws {
+        try await Task.detached {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+            process.arguments = ["-x", "-k", archive.path, destination.path]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                throw InstallError.extractionFailed
+            }
+        }.value
+    }
+
+    private static func installWineICU(
+        into runtimeRoot: URL,
+        fileManager: FileManager,
+        fractionRange: ClosedRange<Double>,
+        progress: @escaping @MainActor @Sendable (InstallProgress) -> Void
+    ) async throws {
+        let compatibilityRoot = runtimeRoot.appending(
+            path: "Compatibility",
+            directoryHint: .isDirectory
+        )
+        try fileManager.createDirectory(
+            at: compatibilityRoot,
+            withIntermediateDirectories: true
+        )
+        let staging = compatibilityRoot.appending(
+            path: ".wine-icu-\(UUID().uuidString)",
+            directoryHint: .isDirectory
+        )
+        try fileManager.createDirectory(at: staging, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: staging) }
+
+        let assets = [
+            ("x86_64", wineICUX64Asset),
+            ("x86", wineICUX86Asset)
+        ]
+        for (index, item) in assets.enumerated() {
+            let (architecture, asset) = item
+            let itemWidth = (fractionRange.upperBound - fractionRange.lowerBound) /
+                Double(assets.count)
+            let itemLowerBound = fractionRange.lowerBound + (Double(index) * itemWidth)
+            let downloadUpperBound = itemLowerBound + (itemWidth * 0.78)
+            let archive = fileManager.temporaryDirectory
+                .appending(path: "\(UUID().uuidString)-\(asset.name)")
+            let outerExtraction = staging.appending(
+                path: "outer-\(architecture)",
+                directoryHint: .isDirectory
+            )
+            let innerExtraction = staging.appending(
+                path: "inner-\(architecture)",
+                directoryHint: .isDirectory
+            )
+            defer { try? fileManager.removeItem(at: archive) }
+
+            try await download(
+                asset,
+                to: archive,
+                fractionRange: itemLowerBound...downloadUpperBound,
+                label: "Windows \(architecture) Unicode support",
+                progress: progress
+            )
+            try verify(asset, at: archive)
+            try fileManager.createDirectory(
+                at: outerExtraction,
+                withIntermediateDirectories: true
+            )
+            try fileManager.createDirectory(
+                at: innerExtraction,
+                withIntermediateDirectories: true
+            )
+            await progress(.init(
+                stage: .extracting,
+                fraction: downloadUpperBound,
+                detail: "Preparing Windows \(architecture) Unicode support…"
+            ))
+            try await extractZip(archive, to: outerExtraction)
+            let innerArchive = outerExtraction.appending(
+                path: "build/wine-icu-\(wineICUVersion)-\(architecture).zip"
+            )
+            guard fileManager.fileExists(atPath: innerArchive.path) else {
+                throw InstallError.runtimeNotFound
+            }
+            try await extractZip(innerArchive, to: innerExtraction)
+            let extracted = innerExtraction.appending(
+                path: "wine-icu-\(wineICUVersion)-\(architecture)",
+                directoryHint: .isDirectory
+            )
+            guard ["icuuc72.dll", "icuin72.dll", "icudt72.dll"].allSatisfy({
+                fileManager.fileExists(atPath: extracted.appending(path: $0).path)
+            }) else {
+                throw InstallError.runtimeNotFound
+            }
+            try fileManager.moveItem(
+                at: extracted,
+                to: staging.appending(path: architecture, directoryHint: .isDirectory)
+            )
+        }
+
+        try Data((wineICUVersion + "\n").utf8).write(
+            to: staging.appending(path: "VERSION"),
+            options: .atomic
+        )
+        let destination = compatibilityRoot.appending(
+            path: wineICUFolderName,
+            directoryHint: .isDirectory
+        )
+        let backup = compatibilityRoot.appending(
+            path: ".previous-wine-icu-\(UUID().uuidString)",
+            directoryHint: .isDirectory
+        )
+        let hadExisting = fileManager.fileExists(atPath: destination.path)
+        if hadExisting {
+            try fileManager.moveItem(at: destination, to: backup)
+        }
+        do {
+            try fileManager.moveItem(at: staging, to: destination)
+            if hadExisting {
+                try? fileManager.removeItem(at: backup)
+            }
+        } catch {
+            if hadExisting, !fileManager.fileExists(atPath: destination.path) {
+                try? fileManager.moveItem(at: backup, to: destination)
+            }
+            throw error
+        }
+    }
+
+    private static func hasCoreRuntimeFiles(
+        at root: URL,
+        fileManager: FileManager
+    ) -> Bool {
+        fileManager.isExecutableFile(
+            atPath: root.appending(path: "wswine.bundle/bin/wine").path
+        ) && fileManager.fileExists(
+            atPath: root.appending(path: "Frameworks", directoryHint: .isDirectory).path
+        )
+    }
+
+    private static func writeVersionMarker(in runtimeRoot: URL) throws {
+        try Data((currentVersion + "\n").utf8).write(
+            to: runtimeRoot.appending(path: versionFileName),
+            options: .atomic
+        )
     }
 
     private static func replaceRuntime(
@@ -264,7 +480,7 @@ enum RuntimeInstaller {
             case .downloadFailed: "The free gaming runtime download failed."
             case .checksumMismatch: "The runtime download was damaged or did not match its trusted checksum."
             case .extractionFailed: "The free gaming runtime could not be extracted."
-            case .runtimeNotFound: "The runtime files were installed, but the Wine executable or support libraries were missing."
+            case .runtimeNotFound: "The runtime files were installed, but Wine or a required Windows compatibility component was missing."
             case .rosettaRequired:
                 "Rosetta 2 is required on Apple Silicon. In Terminal, run: softwareupdate --install-rosetta"
             }

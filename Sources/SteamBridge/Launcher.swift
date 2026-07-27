@@ -82,6 +82,7 @@ enum Launcher {
         guard isSteamInstalled(in: bottle) else {
             throw LaunchError.steamMissing
         }
+        try installManagedWindowsComponentsIfNeeded(in: bottle, using: engine)
         try stopBottleProcesses(in: bottle, using: engine)
         if let displayProfile {
             try applyDisplayProfile(displayProfile, in: bottle, using: engine)
@@ -183,6 +184,7 @@ enum Launcher {
         ), !isDirectory.boolValue else {
             throw LaunchError.windowsApplicationMissing
         }
+        try installManagedWindowsComponentsIfNeeded(in: bottle, using: engine)
         if let displayProfile {
             try applyDisplayProfile(displayProfile, in: bottle, using: engine)
         }
@@ -196,8 +198,117 @@ enum Launcher {
             ),
             graphicsBackend: graphicsBackend
         )
+        process.environment = windowsApplicationEnvironment(
+            for: applicationURL,
+            baseEnvironment: process.environment ?? [:]
+        )
         process.currentDirectoryURL = applicationURL.deletingLastPathComponent()
         try process.run()
+    }
+
+    static func windowsApplicationEnvironment(
+        for applicationURL: URL,
+        baseEnvironment: [String: String],
+        fileManager: FileManager = .default
+    ) -> [String: String] {
+        let applicationFolder = applicationURL.deletingLastPathComponent()
+        let packagedQtFolders = [
+            "_internal/PyQt6/Qt6",
+            "_internal/PySide6/Qt"
+        ]
+        guard packagedQtFolders.contains(where: {
+            fileManager.fileExists(
+                atPath: applicationFolder.appending(path: $0, directoryHint: .isDirectory).path
+            )
+        }) else {
+            return baseEnvironment
+        }
+
+        var environment = baseEnvironment
+        environment["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
+        let compatibilityFlags = ["--disable-gpu", "--disable-gpu-compositing"]
+        var flags = environment["QTWEBENGINE_CHROMIUM_FLAGS"]?
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init) ?? []
+        for flag in compatibilityFlags where !flags.contains(flag) {
+            flags.append(flag)
+        }
+        environment["QTWEBENGINE_CHROMIUM_FLAGS"] = flags.joined(separator: " ")
+        environment["QT_QUICK_BACKEND"] = "software"
+        environment["QT_OPENGL"] = "software"
+        return environment
+    }
+
+    static func installWineICU(
+        from sourceRoot: URL,
+        intoBottleAt bottleRoot: URL,
+        fileManager: FileManager = .default
+    ) throws {
+        let mappings = [
+            ("x86_64", "system32"),
+            ("x86", "syswow64")
+        ]
+        for (architecture, systemDirectory) in mappings {
+            let source = sourceRoot.appending(
+                path: architecture,
+                directoryHint: .isDirectory
+            )
+            let destination = bottleRoot.appending(
+                path: "drive_c/windows/\(systemDirectory)",
+                directoryHint: .isDirectory
+            )
+            let requiredFiles = ["icuuc72.dll", "icuin72.dll", "icudt72.dll"]
+            guard requiredFiles.allSatisfy({
+                fileManager.fileExists(atPath: source.appending(path: $0).path)
+            }) else {
+                throw LaunchError.windowsComponentsMissing
+            }
+            try fileManager.createDirectory(
+                at: destination,
+                withIntermediateDirectories: true
+            )
+            for fileName in requiredFiles {
+                try copyIfMissing(
+                    source.appending(path: fileName),
+                    to: destination.appending(path: fileName),
+                    fileManager: fileManager
+                )
+            }
+            try copyIfMissing(
+                source.appending(path: "icuuc72.dll"),
+                to: destination.appending(path: "icuuc.dll"),
+                fileManager: fileManager
+            )
+            try copyIfMissing(
+                source.appending(path: "icuin72.dll"),
+                to: destination.appending(path: "icuin.dll"),
+                fileManager: fileManager
+            )
+        }
+    }
+
+    private static func installManagedWindowsComponentsIfNeeded(
+        in bottle: Bottle,
+        using engine: Engine,
+        fileManager: FileManager = .default
+    ) throws {
+        guard RuntimeInstaller.isCurrentRuntime(engine, fileManager: fileManager) else {
+            return
+        }
+        try installWineICU(
+            from: RuntimeInstaller.wineICURoot(fileManager: fileManager),
+            intoBottleAt: URL(fileURLWithPath: bottle.path, isDirectory: true),
+            fileManager: fileManager
+        )
+    }
+
+    private static func copyIfMissing(
+        _ source: URL,
+        to destination: URL,
+        fileManager: FileManager
+    ) throws {
+        guard !fileManager.fileExists(atPath: destination.path) else { return }
+        try fileManager.copyItem(at: source, to: destination)
     }
 
     static func clearSteamWebCaches(in bottle: Bottle) {
@@ -623,6 +734,7 @@ enum Launcher {
         case inputConfigurationFailed(Int32)
         case unsupportedWindowsApplication
         case windowsApplicationMissing
+        case windowsComponentsMissing
         case guiEngine(String)
 
         var errorDescription: String? {
@@ -642,6 +754,8 @@ enum Launcher {
                 "Choose a Windows .exe, .msi, .com, .bat, or .cmd file."
             case .windowsApplicationMissing:
                 "The selected Windows application no longer exists at that location."
+            case .windowsComponentsMissing:
+                "Windows Unicode support is missing from the managed runtime. Run Update Free Runtime, then try again."
             case .guiEngine(let message): message
             }
         }

@@ -47,6 +47,9 @@ import Testing
     #expect(RuntimeInstaller.engineAsset.sha256.count == 64)
     #expect(RuntimeInstaller.supportAsset.name == "Template-1.0.11.tar.xz")
     #expect(RuntimeInstaller.supportAsset.sha256.count == 64)
+    #expect(RuntimeInstaller.wineICUX64Asset.sha256.count == 64)
+    #expect(RuntimeInstaller.wineICUX86Asset.sha256.count == 64)
+    #expect(RuntimeInstaller.currentVersion.contains("WineICU-72.1"))
 }
 
 @Test func currentRuntimeIsPreferredOverLegacyStaging() {
@@ -96,6 +99,81 @@ import Testing
     let url = URL(fileURLWithPath: "/Downloads/setup.cmd")
     let arguments = try Launcher.windowsApplicationArguments(for: url)
     #expect(arguments == ["cmd", "/c", url.path])
+}
+
+@Test func wineICUInstallsForBothWindowsArchitecturesWithoutOverwriting() throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let source = root.appending(path: "WineICU", directoryHint: .isDirectory)
+    let bottle = root.appending(path: "Bottle", directoryHint: .isDirectory)
+    for architecture in ["x86_64", "x86"] {
+        let directory = source.appending(path: architecture, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        for fileName in ["icuuc72.dll", "icuin72.dll", "icudt72.dll"] {
+            try Data("\(architecture)-\(fileName)".utf8).write(
+                to: directory.appending(path: fileName)
+            )
+        }
+    }
+    let existing = bottle.appending(path: "drive_c/windows/system32/icuuc.dll")
+    try FileManager.default.createDirectory(
+        at: existing.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    try Data("keep-existing".utf8).write(to: existing)
+
+    try Launcher.installWineICU(from: source, intoBottleAt: bottle)
+
+    #expect(try String(contentsOf: existing, encoding: .utf8) == "keep-existing")
+    #expect(FileManager.default.fileExists(
+        atPath: bottle.appending(path: "drive_c/windows/system32/icudt72.dll").path
+    ))
+    #expect(FileManager.default.fileExists(
+        atPath: bottle.appending(path: "drive_c/windows/system32/icuin.dll").path
+    ))
+    #expect(FileManager.default.fileExists(
+        atPath: bottle.appending(path: "drive_c/windows/syswow64/icuuc.dll").path
+    ))
+    #expect(FileManager.default.fileExists(
+        atPath: bottle.appending(path: "drive_c/windows/syswow64/icudt72.dll").path
+    ))
+}
+
+@Test func packagedPyQtAppsUseWineSafeWebEngineRendering() throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let application = root.appending(path: "Example.exe")
+    let qtRuntime = root.appending(
+        path: "_internal/PyQt6/Qt6",
+        directoryHint: .isDirectory
+    )
+    try FileManager.default.createDirectory(
+        at: qtRuntime,
+        withIntermediateDirectories: true
+    )
+
+    let environment = Launcher.windowsApplicationEnvironment(
+        for: application,
+        baseEnvironment: ["QTWEBENGINE_CHROMIUM_FLAGS": "--existing-flag"]
+    )
+
+    #expect(environment["QTWEBENGINE_DISABLE_SANDBOX"] == "1")
+    #expect(environment["QT_QUICK_BACKEND"] == "software")
+    #expect(environment["QT_OPENGL"] == "software")
+    #expect(environment["QTWEBENGINE_CHROMIUM_FLAGS"]?.contains("--existing-flag") == true)
+    #expect(environment["QTWEBENGINE_CHROMIUM_FLAGS"]?.contains("--disable-gpu") == true)
+}
+
+@Test func nonQtWindowsAppsKeepTheirEnvironment() {
+    let application = URL(fileURLWithPath: "/Applications/Example.exe")
+    let environment = ["CUSTOM": "value"]
+    #expect(Launcher.windowsApplicationEnvironment(
+        for: application,
+        baseEnvironment: environment
+    ) == environment)
 }
 
 @Test func unsupportedWindowsApplicationIsRejected() {

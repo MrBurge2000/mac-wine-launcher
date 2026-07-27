@@ -69,6 +69,12 @@ launch arguments are parsed without a shell, each app starts from its own folder
 recent apps are remembered separately for each bottle. The selected graphics backend
 is shared with directly launched apps.
 
+The managed runtime also installs WineHQ's pinned 32-bit and 64-bit ICU compatibility
+libraries into each bottle. This supplies the Windows Unicode system DLLs expected by
+current PyQt6 and other modern Windows applications. Packaged PyQt6/PySide6 apps are
+detected automatically and Qt WebEngine uses a Wine-safe software rendering fallback,
+without changing the graphics mode used by games or other Windows apps.
+
 Per-bottle display profiles control Wine's macOS Retina mode and Windows DPI. The
 recommended Retina profile renders Steam at 2× resolution with 200% Windows scaling,
 keeping the interface readable while exposing higher display resolutions to games.

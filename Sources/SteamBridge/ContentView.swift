@@ -678,7 +678,11 @@ private struct BottleDetail: View {
         guard let engine else {
             throw RuntimeInstaller.InstallError.runtimeNotFound
         }
-        guard engine.kind == .steamBridge, !RuntimeInstaller.isCurrentRuntime(engine) else {
+        guard engine.kind == .steamBridge else {
+            return engine
+        }
+        if RuntimeInstaller.isCurrentRuntime(engine),
+           RuntimeInstaller.isCurrentRuntimeInstalled() {
             return engine
         }
 
