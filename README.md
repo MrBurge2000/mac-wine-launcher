@@ -92,10 +92,13 @@ unsupported launchers, Windows driver requirements, DRM, and developer-disabled 
 kernel anti-cheat can still prevent a title from running.
 
 The managed runtime contains Steam-specific CEF and macOS windowing fixes. A normal
-**Launch Steam** automatically upgrades legacy SteamBridge runtimes when needed, stops
-stale Wine processes, clears Steam's real per-user web cache, and launches through the
-tested Wine 10 environment. The manual black-window repair action remains available,
-but it is not required for the normal path.
+**Launch Steam** automatically upgrades legacy SteamBridge runtimes when needed and
+launches through the tested Wine 10 environment without stopping the bottle, closing
+other Windows apps, or clearing their state. Steam uses Wine's built-in window-manager
+library so incompatible local window proxies cannot prevent its interface from opening.
+SteamBridge waits for `steamwebhelper.exe` and reports a clear failure if the interface
+does not appear within 30 seconds. The explicit black-window repair remains available
+for the rare case where Steam's web cache genuinely needs to be rebuilt.
 
 **Install Windows Steam** downloads a fresh copy of Valve's official installer every
 time, validates that the download is a complete Windows executable, shows download and

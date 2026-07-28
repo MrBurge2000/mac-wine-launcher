@@ -533,6 +533,11 @@ private struct BottleDetail: View {
                     displayProfile: displayProfile,
                     mouseCaptureProfile: mouseCaptureProfile
                 )
+                operationStatus = "Steam started. Waiting for its interface…"
+                try await Launcher.waitForSteamUI(
+                    in: bottle,
+                    using: readyEngine
+                )
                 let resolved = Launcher.resolvedGraphicsBackend(
                     graphicsBackend,
                     for: readyEngine
@@ -541,7 +546,7 @@ private struct BottleDetail: View {
                     ? " Don’t Panic is using \(mouseCaptureProfile.title)."
                     : ""
                 operationStatus =
-                    "Steam is opening with \(resolved.title) and \(displayProfile.title).\(inputStatus)"
+                    "Steam’s interface is running with \(resolved.title) and \(displayProfile.title).\(inputStatus)"
             } catch {
                 operationStatus = nil
                 report(error.localizedDescription)

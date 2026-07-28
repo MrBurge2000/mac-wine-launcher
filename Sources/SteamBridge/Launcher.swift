@@ -94,7 +94,6 @@ enum Launcher {
         guard isSteamInstalled(in: bottle) else {
             throw LaunchError.steamMissing
         }
-        try stopBottleProcesses(in: bottle, using: engine)
         try repairSteamIntegrity(in: bottle, using: engine)
         if let displayProfile {
             try applyDisplayProfile(displayProfile, in: bottle, using: engine)
@@ -107,18 +106,79 @@ enum Launcher {
                 using: engine
             )
         }
-        if displayProfile != nil || isDontPanicInstalled(in: bottle) {
-            try stopBottleProcesses(in: bottle, using: engine)
-        }
-        if isSikarugir(engine) {
-            clearSteamWebCaches(in: bottle)
-        }
         try run(
             engine: engine,
             bottle: bottle,
             arguments: [steamPath] + steamArguments(for: engine),
             graphicsBackend: graphicsBackend
         )
+    }
+
+    static func waitForSteamUI(
+        in bottle: Bottle,
+        using engine: Engine,
+        timeout: Duration = .seconds(30)
+    ) async throws {
+        guard engine.kind != .crossover, engine.kind != .whisky else { return }
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        repeat {
+            if isWindowsProcessRunning(
+                named: "steamwebhelper.exe",
+                in: bottle,
+                using: engine
+            ) {
+                return
+            }
+            try await Task.sleep(for: .seconds(1))
+        } while clock.now < deadline
+        throw LaunchError.steamUIFailedToStart
+    }
+
+    static func taskListContainsProcess(_ output: String, named processName: String) -> Bool {
+        let expected = processName.lowercased()
+        return output
+            .components(separatedBy: .newlines)
+            .contains { line in
+                guard let firstColumn = line
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .split(whereSeparator: \.isWhitespace)
+                    .first else {
+                    return false
+                }
+                return firstColumn.lowercased() == expected
+            }
+    }
+
+    static func isWindowsProcessRunning(
+        named processName: String,
+        in bottle: Bottle,
+        using engine: Engine
+    ) -> Bool {
+        let process = configuredProcess(
+            engine: engine,
+            bottle: bottle,
+            arguments: [
+                "tasklist",
+                "/NH",
+                "/FI",
+                "IMAGENAME eq \(processName)"
+            ]
+        )
+        let output = Pipe()
+        process.standardOutput = output
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            guard process.terminationStatus == 0,
+                  let text = String(data: data, encoding: .utf8) else {
+                return false
+            }
+            return taskListContainsProcess(text, named: processName)
+        } catch {
+            return false
+        }
     }
 
     static func repairAndLaunchSteam(
@@ -647,7 +707,32 @@ enum Launcher {
             arguments: arguments,
             graphicsBackend: graphicsBackend
         )
+        process.environment = steamProcessEnvironment(
+            baseEnvironment: process.environment ?? [:]
+        )
         try process.run()
+    }
+
+    static func steamProcessEnvironment(
+        baseEnvironment: [String: String]
+    ) -> [String: String] {
+        var environment = baseEnvironment
+        let cleanWindowManagerOverride = "dwmapi=b"
+        if let existing = environment["WINEDLLOVERRIDES"], !existing.isEmpty {
+            let overrides = existing
+                .split(separator: ";")
+                .map(String.init)
+                .filter {
+                    !$0.trimmingCharacters(in: .whitespaces)
+                        .lowercased()
+                        .hasPrefix("dwmapi=")
+                }
+            environment["WINEDLLOVERRIDES"] =
+                (overrides + [cleanWindowManagerOverride]).joined(separator: ";")
+        } else {
+            environment["WINEDLLOVERRIDES"] = cleanWindowManagerOverride
+        }
+        return environment
     }
 
     private static func runAndWait(
@@ -956,6 +1041,7 @@ enum Launcher {
         case invalidInstaller
         case steamMissing
         case steamMissingAfterInstall
+        case steamUIFailedToStart
         case engineCouldNotOpen
         case installerFailed(Int32)
         case displayConfigurationFailed(Int32)
@@ -972,6 +1058,8 @@ enum Launcher {
             case .steamMissing: "Steam is not installed in this bottle yet."
             case .steamMissingAfterInstall:
                 "The Steam installer finished, but Steam was not found. Try Install Windows Steam again."
+            case .steamUIFailedToStart:
+                "Steam started, but its interface did not open within 30 seconds. Other Windows apps were left running. Check the bottle’s Steam add-ons or use Fix Black Steam Window."
             case .engineCouldNotOpen: "The compatibility engine could not be opened."
             case .installerFailed(let status): "The Steam installer exited with status \(status)."
             case .displayConfigurationFailed(let status):

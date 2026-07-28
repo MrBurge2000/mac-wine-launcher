@@ -218,6 +218,28 @@ import Testing
     #expect(environment["QTWEBENGINE_CHROMIUM_FLAGS"]?.contains("--disable-gpu") == true)
 }
 
+@Test func taskListProcessMatchingUsesTheExecutableColumn() {
+    let output = """
+    steam.exe                   32 C:\\Program Files (x86)\\Steam\\steam.exe
+    steamwebhelper.exe         88 C:\\Program Files (x86)\\Steam\\bin\\cef\\steamwebhelper.exe
+    """
+
+    #expect(Launcher.taskListContainsProcess(output, named: "steamwebhelper.exe"))
+    #expect(!Launcher.taskListContainsProcess(output, named: "helper.exe"))
+}
+
+@Test func steamLaunchUsesBuiltinWindowManagerWithoutLosingOtherOverrides() {
+    let environment = Launcher.steamProcessEnvironment(
+        baseEnvironment: [
+            "WINEDLLOVERRIDES": "mscoree=;dwmapi=n;mshtml=",
+            "KEEP_ME": "yes"
+        ]
+    )
+
+    #expect(environment["WINEDLLOVERRIDES"] == "mscoree=;mshtml=;dwmapi=b")
+    #expect(environment["KEEP_ME"] == "yes")
+}
+
 @Test func nonQtWindowsAppsKeepTheirEnvironment() {
     let application = URL(fileURLWithPath: "/Applications/Example.exe")
     let environment = ["CUSTOM": "value"]
