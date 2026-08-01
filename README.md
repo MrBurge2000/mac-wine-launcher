@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/MrBurge2000/mac-wine-launcher/actions/workflows/ci.yml/badge.svg)](https://github.com/MrBurge2000/mac-wine-launcher/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/MrBurge2000/mac-wine-launcher)](https://github.com/MrBurge2000/mac-wine-launcher/releases/latest)
+[![Official website](https://img.shields.io/badge/Website-Mac_Wine_Launcher-4ee7c0)](https://mac-wine-launcher.angelo01px2028.chatgpt.site)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black)](https://github.com/MrBurge2000/mac-wine-launcher/releases/latest)
 
@@ -9,6 +10,9 @@
 Silicon and Intel Mac users an easy graphical way to install Wine, create isolated Wine
 bottles, run Windows `.exe` and `.msi` apps, and install or launch Windows Steam on Mac.
 No CrossOver subscription is required.
+
+[Visit the official website](https://mac-wine-launcher.angelo01px2028.chatgpt.site) for a quick overview,
+compatibility notes, and the latest verified download.
 
 This project was formerly called SteamBridge. The new name makes its purpose clear and
 avoids confusion with unrelated projects that already use that name.
@@ -42,6 +46,7 @@ built for. It is a compatibility layer—not a Windows virtual machine or a Linu
 
 ## Project links
 
+- [Official Mac Wine Launcher website](https://mac-wine-launcher.angelo01px2028.chatgpt.site)
 - [Latest release](https://github.com/MrBurge2000/mac-wine-launcher/releases/latest)
 - [Report a bug](https://github.com/MrBurge2000/mac-wine-launcher/issues/new?template=bug_report.yml)
 - [Request a feature](https://github.com/MrBurge2000/mac-wine-launcher/issues/new?template=feature_request.yml)
