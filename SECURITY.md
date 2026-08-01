@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Only the latest published SteamBridge release receives security fixes.
+Only the latest published Mac Wine Launcher release receives security fixes.
 
 | Version | Supported |
 | --- | --- |
@@ -14,7 +14,7 @@ Only the latest published SteamBridge release receives security fixes.
 Do not open a public issue for a suspected vulnerability. Use GitHub's private
 **Security → Report a vulnerability** form for this repository. Include:
 
-- the affected SteamBridge version and macOS version;
+- the affected Mac Wine Launcher version and macOS version;
 - clear reproduction steps;
 - the expected and observed behavior;
 - relevant logs with credentials, account names, and personal paths removed;
@@ -28,10 +28,10 @@ systems or accounts you do not own or have permission to use.
 ## Security design
 
 - Managed runtime downloads use HTTPS, pinned versions, and SHA-256 checksums.
-- Bottle deletion is restricted to SteamBridge's managed Bottles directory.
+- Bottle deletion is restricted to Mac Wine Launcher's managed Bottles directory.
 - Windows launch arguments are parsed without invoking a shell.
-- Steam credentials are entered into Steam, never SteamBridge.
+- Steam credentials are entered into Steam, never Mac Wine Launcher.
 - Wine shutdown targets processes associated with both the managed bottle and its Wine
   engine, protecting unrelated native applications.
 
-SteamBridge is not an anti-cheat bypass, DRM bypass, or credential-management tool.
+Mac Wine Launcher is not an anti-cheat bypass, DRM bypass, or credential-management tool.

@@ -1,6 +1,6 @@
 # Code of conduct
 
-SteamBridge contributors and users must keep project spaces welcoming, constructive,
+Mac Wine Launcher contributors and users must keep project spaces welcoming, constructive,
 and focused on the software.
 
 ## Expected behavior

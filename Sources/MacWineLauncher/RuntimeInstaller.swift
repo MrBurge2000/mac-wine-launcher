@@ -4,7 +4,8 @@ import Foundation
 enum RuntimeInstaller {
     static let currentVersion = "WS12WineSikarugir10.0_6+Template-1.0.11+WineICU-72.1"
     static let runtimeFolderName = "Sikarugir"
-    static let versionFileName = ".steambridge-runtime-version"
+    static let versionFileName = ".mac-wine-launcher-runtime-version"
+    static let legacyVersionFileName = ".steambridge-runtime-version"
     static let wineICUVersion = "72.1"
     static let wineICUFolderName = "WineICU"
 
@@ -169,17 +170,21 @@ enum RuntimeInstaller {
 
     static func isCurrentRuntimeInstalled(fileManager: FileManager = .default) -> Bool {
         let root = currentRuntimeRoot(fileManager: fileManager)
-        let marker = root.appending(path: versionFileName)
         guard hasCoreRuntimeFiles(at: root, fileManager: fileManager),
-              isWineICUInstalled(at: root, fileManager: fileManager),
-              let value = try? String(contentsOf: marker, encoding: .utf8) else {
+              isWineICUInstalled(at: root, fileManager: fileManager) else {
             return false
         }
-        return value.trimmingCharacters(in: .whitespacesAndNewlines) == currentVersion
+        return [versionFileName, legacyVersionFileName].contains { fileName in
+            guard let value = try? String(
+                contentsOf: root.appending(path: fileName),
+                encoding: .utf8
+            ) else { return false }
+            return value.trimmingCharacters(in: .whitespacesAndNewlines) == currentVersion
+        }
     }
 
     static func isCurrentRuntime(_ engine: Engine, fileManager: FileManager = .default) -> Bool {
-        guard engine.kind == .steamBridge else { return false }
+        guard engine.kind == .managedWine else { return false }
         return engine.executableURL.standardizedFileURL.path ==
             currentRuntimeExecutable(fileManager: fileManager).standardizedFileURL.path
     }

@@ -41,7 +41,7 @@ enum Launcher {
         }
         guard engine.kind != .whisky else {
             throw LaunchError.guiEngine(
-                "Whisky is no longer maintained. SteamBridge Wine is the free recommended option."
+                "Whisky is no longer maintained. Mac Wine Launcher Wine is the free recommended option."
             )
         }
         await progress(.init(stage: .preparing, fraction: 0.02, detail: "Stopping old Steam processes…"))
@@ -242,12 +242,12 @@ enum Launcher {
     ) throws {
         guard engine.kind != .crossover else {
             throw LaunchError.guiEngine(
-                "Direct app launching is available with SteamBridge Wine or system Wine. Open CrossOver to run this file in a CrossOver bottle."
+                "Direct app launching is available with Mac Wine Launcher Wine or system Wine. Open CrossOver to run this file in a CrossOver bottle."
             )
         }
         guard engine.kind != .whisky else {
             throw LaunchError.guiEngine(
-                "Whisky is no longer maintained. Use SteamBridge Wine for direct Windows app launching."
+                "Whisky is no longer maintained. Use Mac Wine Launcher Wine for direct Windows app launching."
             )
         }
         var isDirectory: ObjCBool = false
@@ -479,7 +479,7 @@ enum Launcher {
                 at: configuration,
                 to: availableQuarantineURL(
                     for: configuration,
-                    suffix: "disabled-by-steambridge",
+                    suffix: "disabled-by-mac-wine-launcher",
                     fileManager: fileManager
                 )
             )
@@ -513,7 +513,7 @@ enum Launcher {
         }
         let quarantine = availableQuarantineURL(
             for: current,
-            suffix: "replaced-by-steambridge",
+            suffix: "replaced-by-mac-wine-launcher",
             fileManager: fileManager
         )
         try fileManager.moveItem(at: current, to: quarantine)
@@ -775,7 +775,7 @@ enum Launcher {
     }
 
     static func isSikarugir(_ engine: Engine) -> Bool {
-        engine.kind == .steamBridge &&
+        engine.kind == .managedWine &&
             engine.executableURL.path.localizedCaseInsensitiveContains("Sikarugir")
     }
 
@@ -1162,7 +1162,7 @@ enum Launcher {
             case .steamUIFailedToStart:
                 "Steam started, but its interface did not open within 30 seconds. Other Windows apps were left running. Check the bottle’s Steam add-ons or use Fix Black Steam Window."
             case .bottleShutdownFailed(let processIDs):
-                "SteamBridge could not stop Wine processes: \(processIDs.map(String.init).joined(separator: ", ")). Restart the Mac before launching this bottle again."
+                "Mac Wine Launcher could not stop Wine processes: \(processIDs.map(String.init).joined(separator: ", ")). Restart the Mac before launching this bottle again."
             case .engineCouldNotOpen: "The compatibility engine could not be opened."
             case .installerFailed(let status): "The Steam installer exited with status \(status)."
             case .displayConfigurationFailed(let status):

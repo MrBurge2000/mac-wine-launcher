@@ -1,6 +1,6 @@
-# Contributing to SteamBridge
+# Contributing to Mac Wine Launcher
 
-Thanks for helping improve SteamBridge. Contributions are accepted through reviewed
+Thanks for helping improve Mac Wine Launcher. Contributions are accepted through reviewed
 pull requests; nobody should push feature work directly to `main`.
 
 ## Before you start

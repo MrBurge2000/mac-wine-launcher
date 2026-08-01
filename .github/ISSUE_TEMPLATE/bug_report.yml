@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible SteamBridge problem
+description: Report a reproducible Mac Wine Launcher problem
 title: "[Bug]: "
 labels: [bug, needs-triage]
 body:
@@ -10,8 +10,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: SteamBridge version
-      placeholder: 0.5.5 (18)
+      label: Mac Wine Launcher version
+      placeholder: 0.6.0 (19)
     validations:
       required: true
   - type: input
@@ -26,7 +26,7 @@ body:
     attributes:
       label: Compatibility engine
       options:
-        - SteamBridge Wine
+        - Mac Wine Launcher Wine
         - CrossOver
         - System Wine
         - Other

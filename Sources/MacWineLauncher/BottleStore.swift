@@ -9,12 +9,26 @@ final class BottleStore: ObservableObject {
     private let rootURL: URL
     private let manifestURL: URL
 
-    init(fileManager: FileManager = .default, rootURL: URL? = nil) {
+    init(
+        fileManager: FileManager = .default,
+        rootURL: URL? = nil,
+        applicationSupportURL: URL? = nil
+    ) {
         self.fileManager = fileManager
-        let support = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        self.rootURL = rootURL ?? support.appending(path: "SteamBridge", directoryHint: .isDirectory)
+        let usesManagedRoot = rootURL == nil
+        self.rootURL = rootURL ?? AppDataPaths.supportRoot(
+            fileManager: fileManager,
+            supportDirectory: applicationSupportURL
+        )
         manifestURL = self.rootURL.appending(path: "bottles.json")
-        load()
+        load(
+            migratingFrom: usesManagedRoot
+                ? AppDataPaths.legacySupportRoot(
+                    fileManager: fileManager,
+                    supportDirectory: applicationSupportURL
+                )
+                : nil
+        )
     }
 
     func create(name: String, engine: EngineKind) throws -> Bottle {
@@ -43,10 +57,25 @@ final class BottleStore: ObservableObject {
         try save()
     }
 
-    private func load() {
+    private func load(migratingFrom legacyRoot: URL?) {
         guard let data = try? Data(contentsOf: manifestURL),
               let decoded = try? JSONDecoder().decode([Bottle].self, from: data) else { return }
-        bottles = decoded
+        guard let legacyRoot else {
+            bottles = decoded
+            return
+        }
+
+        let legacyPrefix = legacyRoot.standardizedFileURL.path + "/"
+        let currentPrefix = rootURL.standardizedFileURL.path + "/"
+        bottles = decoded.map { bottle in
+            guard bottle.path.hasPrefix(legacyPrefix) else { return bottle }
+            var migrated = bottle
+            migrated.path = currentPrefix + bottle.path.dropFirst(legacyPrefix.count)
+            return migrated
+        }
+        if bottles != decoded {
+            try? save()
+        }
     }
 
     private func save() throws {
@@ -83,7 +112,7 @@ final class BottleStore: ObservableObject {
             switch self {
             case .emptyName: "Enter a bottle name."
             case .alreadyExists: "A bottle with that folder name already exists."
-            case .unsafeLocation: "SteamBridge refused to delete a bottle outside its managed Bottles folder."
+            case .unsafeLocation: "Mac Wine Launcher refused to delete a bottle outside its managed Bottles folder."
             }
         }
     }

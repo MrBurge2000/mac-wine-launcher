@@ -29,7 +29,7 @@ enum EngineDiscovery {
             if left.kind.preferenceRank != right.kind.preferenceRank {
                 return left.kind.preferenceRank < right.kind.preferenceRank
             }
-            if left.kind == .steamBridge {
+            if left.kind == .managedWine {
                 return runtimePreference(for: left.executableURL.path) <
                     runtimePreference(for: right.executableURL.path)
             }
@@ -38,8 +38,8 @@ enum EngineDiscovery {
     }
 
     static func managedRuntimeRoot(fileManager: FileManager = .default) -> URL {
-        fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appending(path: "SteamBridge/Runtime", directoryHint: .isDirectory)
+        AppDataPaths.supportRoot(fileManager: fileManager)
+            .appending(path: "Runtime", directoryHint: .isDirectory)
     }
 
     private static func managedRuntimeCandidates(fileManager: FileManager) -> [(EngineKind, String)] {
@@ -55,7 +55,7 @@ enum EngineDiscovery {
             guard ["wine64", "wine"].contains(url.lastPathComponent),
                   url.path.contains("/bin/"),
                   fileManager.isExecutableFile(atPath: url.path) else { continue }
-            results.append((.steamBridge, url.path))
+            results.append((.managedWine, url.path))
         }
         return results.sorted { left, right in
             runtimePreference(for: left.1) < runtimePreference(for: right.1)

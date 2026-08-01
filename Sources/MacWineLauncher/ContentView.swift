@@ -17,7 +17,7 @@ struct ContentView: View {
                 Label(bottle.name, systemImage: "shippingbox")
                     .tag(bottle.id)
             }
-            .navigationTitle("SteamBridge")
+            .navigationTitle("Mac Wine Launcher")
             .toolbar {
                 Button(action: { showingNewBottle = true }) {
                     Label("New Bottle", systemImage: "plus")
@@ -80,7 +80,7 @@ struct ContentView: View {
                 }
             }
         }
-        .alert("SteamBridge", isPresented: Binding(
+        .alert("Mac Wine Launcher", isPresented: Binding(
             get: { message != nil },
             set: { if !$0 { message = nil } }
         )) {
@@ -98,7 +98,7 @@ struct ContentView: View {
                     runtimeProgress = update
                 }
                 engines = EngineDiscovery.discover()
-                message = "SteamBridge Wine is installed. Create a bottle to install Windows Steam."
+                message = "Mac Wine Launcher Wine is installed. Create a bottle to install Windows Steam."
             } catch {
                 message = error.localizedDescription
                 runtimeProgress = nil
@@ -148,8 +148,8 @@ private struct NewBottleView: View {
                 }
             }
             Text(engine == .crossover
-                 ? "SteamBridge will open CrossOver, whose installer creates and tunes the real Windows bottle."
-                 : "A bottle is an isolated Windows environment. SteamBridge Wine is free and managed by this app.")
+                 ? "Mac Wine Launcher will open CrossOver, whose installer creates and tunes the real Windows bottle."
+                 : "A bottle is an isolated Windows environment. Mac Wine Launcher Wine is free and managed by this app.")
                 .foregroundStyle(.secondary)
         }
         .padding()
@@ -194,7 +194,7 @@ private struct BottleDetail: View {
     @State private var mouseCaptureProfile: MouseCaptureProfile = .menuSafe
     @State private var windowsArguments = ""
     @State private var recentWindowsApplications: [RecentWindowsApplication] = []
-    @AppStorage(SteamBridgeAppDelegate.stopWineOnQuitKey)
+    @AppStorage(MacWineLauncherAppDelegate.stopWineOnQuitKey)
     private var stopWineOnQuit = true
 
     var body: some View {
@@ -205,7 +205,7 @@ private struct BottleDetail: View {
                 if engine?.kind == .crossover {
                     Label("Commercial engine", systemImage: "checkmark.seal.fill")
                         .foregroundStyle(.green)
-                } else if engine?.kind == .steamBridge {
+                } else if engine?.kind == .managedWine {
                     if let engine, RuntimeInstaller.isCurrentRuntime(engine) {
                         Label("Current free gaming runtime", systemImage: "checkmark.seal.fill")
                             .foregroundStyle(.green)
@@ -240,15 +240,15 @@ private struct BottleDetail: View {
                             isWorking ||
                             (engine?.kind != .crossover && !Launcher.isSteamInstalled(in: bottle))
                     )
-                    if engine?.kind == .steamBridge || engine?.kind == .wine {
+                    if engine?.kind == .managedWine || engine?.kind == .wine {
                         Button("Stop Steam & Wine…") {
                             showingStopConfirmation = true
                         }
                         .disabled(isWorking)
                     }
                 }
-                if engine?.kind == .steamBridge || engine?.kind == .wine {
-                    Toggle("Stop Steam and Wine when SteamBridge quits", isOn: $stopWineOnQuit)
+                if engine?.kind == .managedWine || engine?.kind == .wine {
+                    Toggle("Stop Steam and Wine when Mac Wine Launcher quits", isOn: $stopWineOnQuit)
                     Text("Enabled by default so invisible Wine helpers cannot keep using CPU and battery after this app closes.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -282,7 +282,7 @@ private struct BottleDetail: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                if engine?.kind == .steamBridge || engine?.kind == .wine {
+                if engine?.kind == .managedWine || engine?.kind == .wine {
                     Button("Fix Black Steam Window") { repairSteam() }
                         .disabled(isWorking)
                     Text("Closes Steam, clears its web-interface cache, and relaunches with software-rendered UI.")
@@ -417,7 +417,7 @@ private struct BottleDetail: View {
                         systemImage: "checkmark.shield.fill"
                     )
                     .foregroundStyle(.green)
-                    Text("SteamBridge quietly applies known fixes only to affected games. No action is needed unless a problem returns.")
+                    Text("Mac Wine Launcher quietly applies known fixes only to affected games. No action is needed unless a problem returns.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     DisclosureGroup(
@@ -444,7 +444,7 @@ private struct BottleDetail: View {
                             launch()
                         }
                         .disabled(engine == nil || isWorking)
-                        Text("If the pointer becomes trapped again, press ⌥↩ to toggle window mode, then ⌘Tab back to SteamBridge and try another mouse mode here.")
+                        Text("If the pointer becomes trapped again, press ⌥↩ to toggle window mode, then ⌘Tab back to Mac Wine Launcher and try another mouse mode here.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -469,7 +469,7 @@ private struct BottleDetail: View {
             }
 
             Section("Compatibility limits") {
-                Text("SteamBridge now activates dedicated DirectX 9, 10, 11, and 12 renderers. It cannot bypass DRM or supply Windows kernel drivers; games that require unsupported kernel anti-cheat can still be blocked.")
+                Text("Mac Wine Launcher now activates dedicated DirectX 9, 10, 11, and 12 renderers. It cannot bypass DRM or supply Windows kernel drivers; games that require unsupported kernel anti-cheat can still be blocked.")
                     .foregroundStyle(.secondary)
             }
 
@@ -481,7 +481,7 @@ private struct BottleDetail: View {
                 if isUninstalling {
                     ProgressView("Uninstalling bottle…")
                 }
-                Text("Deletes this bottle, Windows Steam, and every game installed inside it. The SteamBridge app and shared Wine runtime stay installed.")
+                Text("Deletes this bottle, Windows Steam, and every game installed inside it. The Mac Wine Launcher app and shared Wine runtime stay installed.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -733,7 +733,7 @@ private struct BottleDetail: View {
         Task {
             do {
                 try await uninstall()
-                report("“\(bottle.name)” was uninstalled. SteamBridge and its shared Wine runtime were kept.")
+                report("“\(bottle.name)” was uninstalled. Mac Wine Launcher and its shared Wine runtime were kept.")
             } catch {
                 report(error.localizedDescription)
             }
@@ -745,7 +745,7 @@ private struct BottleDetail: View {
         guard let engine else {
             throw RuntimeInstaller.InstallError.runtimeNotFound
         }
-        guard engine.kind == .steamBridge else {
+        guard engine.kind == .managedWine else {
             return engine
         }
         if RuntimeInstaller.isCurrentRuntime(engine),
@@ -756,7 +756,7 @@ private struct BottleDetail: View {
         try await RuntimeInstaller.install { runtimeProgress = $0 }
         refreshEngines()
         guard let updated = EngineDiscovery.discover().first(where: {
-            $0.kind == .steamBridge && RuntimeInstaller.isCurrentRuntime($0)
+            $0.kind == .managedWine && RuntimeInstaller.isCurrentRuntime($0)
         }) else {
             throw RuntimeInstaller.InstallError.runtimeNotFound
         }
