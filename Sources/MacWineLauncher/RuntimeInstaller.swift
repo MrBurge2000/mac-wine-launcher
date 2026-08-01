@@ -5,7 +5,6 @@ enum RuntimeInstaller {
     static let currentVersion = "WS12WineSikarugir10.0_6+Template-1.0.11+WineICU-72.1"
     static let runtimeFolderName = "Sikarugir"
     static let versionFileName = ".mac-wine-launcher-runtime-version"
-    static let legacyVersionFileName = ".steambridge-runtime-version"
     static let wineICUVersion = "72.1"
     static let wineICUFolderName = "WineICU"
 
@@ -174,13 +173,11 @@ enum RuntimeInstaller {
               isWineICUInstalled(at: root, fileManager: fileManager) else {
             return false
         }
-        return [versionFileName, legacyVersionFileName].contains { fileName in
-            guard let value = try? String(
-                contentsOf: root.appending(path: fileName),
-                encoding: .utf8
-            ) else { return false }
-            return value.trimmingCharacters(in: .whitespacesAndNewlines) == currentVersion
-        }
+        guard let value = try? String(
+            contentsOf: root.appending(path: versionFileName),
+            encoding: .utf8
+        ) else { return false }
+        return value.trimmingCharacters(in: .whitespacesAndNewlines) == currentVersion
     }
 
     static func isCurrentRuntime(_ engine: Engine, fileManager: FileManager = .default) -> Bool {
@@ -411,6 +408,16 @@ enum RuntimeInstaller {
             to: runtimeRoot.appending(path: versionFileName),
             options: .atomic
         )
+        if let entries = try? FileManager.default.contentsOfDirectory(
+            at: runtimeRoot,
+            includingPropertiesForKeys: nil
+        ) {
+            for entry in entries where entry.lastPathComponent != versionFileName &&
+                entry.lastPathComponent.hasPrefix(".") &&
+                entry.lastPathComponent.hasSuffix("runtime-version") {
+                try? FileManager.default.removeItem(at: entry)
+            }
+        }
     }
 
     private static func replaceRuntime(

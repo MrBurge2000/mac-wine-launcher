@@ -18,6 +18,7 @@ CONTENTS="$APP/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
 
+rm -rf "$APP"
 mkdir -p "$MACOS" "$RESOURCES"
 cp "$UNIVERSAL_BUILD/apple/Products/Release/MacWineLauncher" "$MACOS/MacWineLauncher"
 cp "Resources/Info.plist" "$CONTENTS/Info.plist"

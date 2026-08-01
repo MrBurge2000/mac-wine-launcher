@@ -29,17 +29,16 @@ enum EngineKind: String, Codable, CaseIterable, Identifiable, Sendable {
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         let value = try container.decode(String.self)
-        if value == "SteamBridge Wine" {
+        if let known = Self(rawValue: value) {
+            self = known
+        } else if value.hasSuffix(" Wine") {
             self = .managedWine
-            return
-        }
-        guard let kind = Self(rawValue: value) else {
+        } else {
             throw DecodingError.dataCorruptedError(
                 in: container,
-                debugDescription: "Unknown compatibility engine: \(value)"
+                debugDescription: "Unknown compatibility engine"
             )
         }
-        self = kind
     }
 
     func encode(to encoder: Encoder) throws {

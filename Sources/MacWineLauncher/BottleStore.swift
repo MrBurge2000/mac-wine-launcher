@@ -15,20 +15,12 @@ final class BottleStore: ObservableObject {
         applicationSupportURL: URL? = nil
     ) {
         self.fileManager = fileManager
-        let usesManagedRoot = rootURL == nil
         self.rootURL = rootURL ?? AppDataPaths.supportRoot(
             fileManager: fileManager,
             supportDirectory: applicationSupportURL
         )
         manifestURL = self.rootURL.appending(path: "bottles.json")
-        load(
-            migratingFrom: usesManagedRoot
-                ? AppDataPaths.legacySupportRoot(
-                    fileManager: fileManager,
-                    supportDirectory: applicationSupportURL
-                )
-                : nil
-        )
+        load()
     }
 
     func create(name: String, engine: EngineKind) throws -> Bottle {
@@ -57,20 +49,23 @@ final class BottleStore: ObservableObject {
         try save()
     }
 
-    private func load(migratingFrom legacyRoot: URL?) {
+    private func load() {
         guard let data = try? Data(contentsOf: manifestURL),
               let decoded = try? JSONDecoder().decode([Bottle].self, from: data) else { return }
-        guard let legacyRoot else {
-            bottles = decoded
-            return
-        }
-
-        let legacyPrefix = legacyRoot.standardizedFileURL.path + "/"
         let currentPrefix = rootURL.standardizedFileURL.path + "/"
         bottles = decoded.map { bottle in
-            guard bottle.path.hasPrefix(legacyPrefix) else { return bottle }
+            guard !bottle.path.hasPrefix(currentPrefix),
+                  let range = bottle.path.range(of: "/Bottles/") else {
+                return bottle
+            }
+            let relativePath = String(bottle.path[range.upperBound...])
+            let candidate = rootURL.appending(
+                path: "Bottles/\(relativePath)",
+                directoryHint: .isDirectory
+            )
+            guard fileManager.fileExists(atPath: candidate.path) else { return bottle }
             var migrated = bottle
-            migrated.path = currentPrefix + bottle.path.dropFirst(legacyPrefix.count)
+            migrated.path = candidate.path
             return migrated
         }
         if bottles != decoded {
