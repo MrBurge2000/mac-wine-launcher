@@ -1,10 +1,16 @@
 # Changelog
 
-All notable changes to SteamBridge are recorded here.
+All notable changes to Mac Wine Launcher are recorded here.
 
 ## [Unreleased]
 
-No changes yet.
+## [0.6.0] - 2026-08-02
+
+- Renamed SteamBridge to Mac Wine Launcher so its role as an easy macOS Wine wrapper is
+  clear and it no longer conflicts with existing SteamBridge projects.
+- Migrated existing bottles, manifests, and the managed Wine runtime in place.
+- Added compatibility decoding for bottles created under the former engine name.
+- Updated the app bundle, DMG, documentation, repository metadata, and support links.
 
 ## [0.5.5] - 2026-08-01
 
@@ -13,7 +19,7 @@ No changes yet.
 
 ## [0.5.4] - 2026-08-01
 
-- Added automatic managed-bottle shutdown when SteamBridge quits.
+- Added automatic managed-bottle shutdown when Mac Wine Launcher quits.
 - Added a visible Stop Steam & Wine action.
 - Added bounded shutdown escalation for orphaned Wine helpers.
 - Protected unrelated native processes with bottle-and-engine process matching.
@@ -37,7 +43,8 @@ No changes yet.
 
 ## [0.5.0] - 2026-07-26
 
-- Initial public SteamBridge launcher.
+- Initial public release under the SteamBridge name.
 
-[Unreleased]: https://github.com/MrBurge2000/SteamBridge/compare/v0.5.5...HEAD
-[0.5.5]: https://github.com/MrBurge2000/SteamBridge/releases/tag/v0.5.5
+[Unreleased]: https://github.com/MrBurge2000/mac-wine-launcher/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/MrBurge2000/mac-wine-launcher/releases/tag/v0.6.0
+[0.5.5]: https://github.com/MrBurge2000/mac-wine-launcher/releases/tag/v0.5.5

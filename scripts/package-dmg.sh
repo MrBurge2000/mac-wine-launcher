@@ -11,13 +11,13 @@ fi
 
 ./scripts/package-app.sh
 
-TEMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/steambridge-dmg.XXXXXX")
+TEMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/mac-wine-launcher-dmg.XXXXXX")
 STAGE="$TEMP_ROOT/stage"
-RW_DMG="$TEMP_ROOT/SteamBridge-rw.dmg"
-OUTPUT_DMG="$PROJECT_ROOT/dist/SteamBridge.dmg"
+RW_DMG="$TEMP_ROOT/Mac-Wine-Launcher-rw.dmg"
+OUTPUT_DMG="$PROJECT_ROOT/dist/Mac-Wine-Launcher.dmg"
 APP_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" \
     "$PROJECT_ROOT/Resources/Info.plist")
-VOLUME_NAME="SteamBridge $APP_VERSION"
+VOLUME_NAME="Mac Wine Launcher $APP_VERSION"
 MOUNT_POINT=""
 
 cleanup() {
@@ -29,7 +29,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 mkdir -p "$STAGE/.background"
-ditto "$PROJECT_ROOT/dist/SteamBridge.app" "$STAGE/SteamBridge.app"
+ditto "$PROJECT_ROOT/dist/Mac Wine Launcher.app" "$STAGE/Mac Wine Launcher.app"
 ln -s /Applications "$STAGE/Applications"
 cp "$PROJECT_ROOT/Resources/Branding/dmg-background.png" "$STAGE/.background/background.png"
 cp "$PROJECT_ROOT/Resources/AppIcon.icns" "$STAGE/.VolumeIcon.icns"
@@ -66,7 +66,7 @@ tell application "Finder"
         set icon size of theViewOptions to 112
         set text size of theViewOptions to 13
         set background picture of theViewOptions to file ".background:background.png"
-        set position of item "SteamBridge.app" of container window to {150, 245}
+        set position of item "Mac Wine Launcher.app" of container window to {150, 245}
         set position of item "Applications" of container window to {510, 245}
         update without registering applications
         delay 2

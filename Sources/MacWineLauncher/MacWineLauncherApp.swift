@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-final class SteamBridgeAppDelegate: NSObject, NSApplicationDelegate {
+final class MacWineLauncherAppDelegate: NSObject, NSApplicationDelegate {
     static let stopWineOnQuitKey = "stopWineOnQuit"
 
     @MainActor var bottlesProvider: () -> [Bottle] = { [] }
@@ -37,7 +37,7 @@ final class SteamBridgeAppDelegate: NSObject, NSApplicationDelegate {
                 do {
                     try Launcher.stopBottleProcesses(in: bottle, using: engine)
                 } catch {
-                    NSLog("SteamBridge shutdown cleanup failed for %@: %@", bottle.name, error.localizedDescription)
+                    NSLog("Mac Wine Launcher shutdown cleanup failed for %@: %@", bottle.name, error.localizedDescription)
                 }
             }
             await MainActor.run {
@@ -49,8 +49,8 @@ final class SteamBridgeAppDelegate: NSObject, NSApplicationDelegate {
 }
 
 @main
-struct SteamBridgeApp: App {
-    @NSApplicationDelegateAdaptor(SteamBridgeAppDelegate.self) private var appDelegate
+struct MacWineLauncherApp: App {
+    @NSApplicationDelegateAdaptor(MacWineLauncherAppDelegate.self) private var appDelegate
     @StateObject private var store = BottleStore()
 
     var body: some Scene {

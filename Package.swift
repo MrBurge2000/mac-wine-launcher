@@ -2,20 +2,20 @@
 import PackageDescription
 
 let package = Package(
-    name: "SteamBridge",
+    name: "MacWineLauncher",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "SteamBridge", targets: ["SteamBridge"])
+        .executable(name: "MacWineLauncher", targets: ["MacWineLauncher"])
     ],
     targets: [
         .executableTarget(
-            name: "SteamBridge",
-            path: "Sources/SteamBridge"
+            name: "MacWineLauncher",
+            path: "Sources/MacWineLauncher"
         ),
         .testTarget(
-            name: "SteamBridgeTests",
-            dependencies: ["SteamBridge"],
-            path: "Tests/SteamBridgeTests"
+            name: "MacWineLauncherTests",
+            dependencies: ["MacWineLauncher"],
+            path: "Tests/MacWineLauncherTests"
         )
     ]
 )

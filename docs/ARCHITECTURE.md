@@ -1,6 +1,6 @@
 # Architecture
 
-SteamBridge is a SwiftUI macOS application built as a Swift Package executable.
+Mac Wine Launcher is a SwiftUI macOS application built as a Swift Package executable.
 
 ## Components
 
@@ -11,11 +11,11 @@ SteamBridge is a SwiftUI macOS application built as a Swift Package executable.
   registry configuration, UI health checks, and bottle-scoped shutdown.
 - `ContentView` presents bottle, Steam, Windows application, display, graphics, known-fix,
   and uninstall workflows.
-- `SteamBridgeAppDelegate` performs managed-bottle cleanup when the macOS app terminates.
+- `MacWineLauncherAppDelegate` performs managed-bottle cleanup when the macOS app terminates.
 
 ## Trust boundaries
 
-SteamBridge accepts local Windows executable paths and starts them directly through Wine;
+Mac Wine Launcher accepts local Windows executable paths and starts them directly through Wine;
 it does not interpolate them into a shell. Runtime downloads are trusted only after their
 pinned digest matches. Destructive bottle operations must resolve underneath the managed
 Bottles directory. Process cleanup intersects bottle-open files with the selected Wine

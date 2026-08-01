@@ -28,4 +28,4 @@ jobs:
       - name: Build universal application
         run: ./scripts/package-app.sh
       - name: Verify application signature
-        run: codesign --verify --deep --strict dist/SteamBridge.app
+        run: codesign --verify --deep --strict "dist/Mac Wine Launcher.app"

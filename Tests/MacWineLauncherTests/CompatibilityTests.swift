@@ -1,7 +1,12 @@
 import Darwin
 import Foundation
 import Testing
-@testable import SteamBridge
+@testable import MacWineLauncher
+
+@Test func legacyEngineNameMigrates() throws {
+    let data = Data(#""SteamBridge Wine""#.utf8)
+    #expect(try JSONDecoder().decode(EngineKind.self, from: data) == .managedWine)
+}
 
 @Test func antiCheatIsBlocked() {
     let result = GameCompatibility.assess(title: "Example", notes: "Uses Easy Anti-Cheat")
@@ -40,7 +45,7 @@ import Testing
 
 @Test func freeRuntimeIsPreferred() {
     let kinds = EngineKind.allCases.sorted { $0.preferenceRank < $1.preferenceRank }
-    #expect(kinds.first == .steamBridge)
+    #expect(kinds.first == .managedWine)
 }
 
 @Test func currentSikarugirRuntimeIsPinnedAndChecksummed() {
@@ -62,7 +67,7 @@ import Testing
 
 @Test func sikarugirSteamLaunchUsesNativeEngineFixes() {
     let current = Engine(
-        kind: .steamBridge,
+        kind: .managedWine,
         executableURL: URL(fileURLWithPath: "/Runtime/Sikarugir/wswine.bundle/bin/wine")
     )
     #expect(Launcher.steamArguments(for: current).isEmpty)
@@ -186,11 +191,11 @@ import Testing
 
     #expect(!FileManager.default.fileExists(atPath: steam.appending(path: "steam.cfg").path))
     #expect(FileManager.default.fileExists(
-        atPath: steam.appending(path: "steam.cfg.disabled-by-steambridge").path
+        atPath: steam.appending(path: "steam.cfg.disabled-by-mac-wine-launcher").path
     ))
     #expect(try Data(contentsOf: current).last == 2)
     #expect(FileManager.default.fileExists(
-        atPath: steam.appending(path: "steam.exe.replaced-by-steambridge").path
+        atPath: steam.appending(path: "steam.exe.replaced-by-mac-wine-launcher").path
     ))
 }
 
@@ -387,8 +392,8 @@ private func peStub(machine: UInt16, marker: UInt8 = 0) -> Data {
     try Data().write(to: wine)
     try Data().write(to: d3dMetal)
     try Data().write(to: shared)
-    let engine = Engine(kind: .steamBridge, executableURL: wine)
-    let bottle = Bottle(name: "Test", path: "/Bottle", engine: .steamBridge)
+    let engine = Engine(kind: .managedWine, executableURL: wine)
+    let bottle = Bottle(name: "Test", path: "/Bottle", engine: .managedWine)
 
     #expect(Launcher.availableGraphicsBackends(for: engine).contains(.d3dMetal))
     let environment = Launcher.configuredEnvironment(
@@ -443,7 +448,7 @@ private func peStub(machine: UInt16, marker: UInt8 = 0) -> Data {
 @Test func steamInstallationDetectionRequiresExecutable() throws {
     let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
-    let bottle = Bottle(name: "Test", path: root.path, engine: .steamBridge)
+    let bottle = Bottle(name: "Test", path: root.path, engine: .managedWine)
     let executable = Launcher.steamExecutableURL(in: bottle)
     try FileManager.default.createDirectory(
         at: executable.deletingLastPathComponent(),
@@ -489,7 +494,7 @@ private func peStub(machine: UInt16, marker: UInt8 = 0) -> Data {
     let cache = root.appending(path: "drive_c/users/test/AppData/Local/Steam/htmlcache")
     try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
     try Data("cached".utf8).write(to: cache.appending(path: "data.bin"))
-    let bottle = Bottle(name: "Test", path: root.path, engine: .steamBridge)
+    let bottle = Bottle(name: "Test", path: root.path, engine: .managedWine)
 
     Launcher.clearSteamWebCaches(in: bottle)
 
@@ -505,11 +510,31 @@ private func peStub(machine: UInt16, marker: UInt8 = 0) -> Data {
     #expect(second.bottles == [created])
 }
 
+@Test @MainActor func legacyApplicationSupportDataMigratesWithoutLosingBottles() throws {
+    let support = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: support) }
+    let legacyRoot = support.appending(path: "SteamBridge", directoryHint: .isDirectory)
+    let legacyBottle = legacyRoot.appending(path: "Bottles/Windows Steam")
+    try FileManager.default.createDirectory(at: legacyBottle, withIntermediateDirectories: true)
+
+    let bottle = Bottle(name: "Windows Steam", path: legacyBottle.path, engine: .managedWine)
+    let encoder = JSONEncoder()
+    try encoder.encode([bottle]).write(to: legacyRoot.appending(path: "bottles.json"))
+
+    let store = BottleStore(applicationSupportURL: support)
+    let currentRoot = support.appending(path: "Mac Wine Launcher", directoryHint: .isDirectory)
+
+    #expect(!FileManager.default.fileExists(atPath: legacyRoot.path))
+    #expect(FileManager.default.fileExists(atPath: currentRoot.path))
+    #expect(store.bottles.count == 1)
+    #expect(store.bottles[0].path == currentRoot.appending(path: "Bottles/Windows Steam").path)
+}
+
 @Test @MainActor func bottleStoreUninstallsBottleData() async throws {
     let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
     let store = BottleStore(rootURL: root)
-    let bottle = try store.create(name: "Disposable", engine: .steamBridge)
+    let bottle = try store.create(name: "Disposable", engine: .managedWine)
     let marker = URL(fileURLWithPath: bottle.path).appending(path: "installed-game.dat")
     try Data("game data".utf8).write(to: marker)
 
@@ -527,7 +552,7 @@ private func peStub(machine: UInt16, marker: UInt8 = 0) -> Data {
         try? FileManager.default.removeItem(at: outside)
     }
     try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
-    var bottle = Bottle(name: "Unsafe", path: outside.path, engine: .steamBridge)
+    var bottle = Bottle(name: "Unsafe", path: outside.path, engine: .managedWine)
     bottle.path = outside.path
     let store = BottleStore(rootURL: root)
 

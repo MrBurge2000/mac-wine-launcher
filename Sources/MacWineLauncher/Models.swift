@@ -1,7 +1,7 @@
 import Foundation
 
 enum EngineKind: String, Codable, CaseIterable, Identifiable, Sendable {
-    case steamBridge = "SteamBridge Wine"
+    case managedWine = "Mac Wine Launcher Wine"
     case crossover = "CrossOver"
     case wine = "Wine"
     case whisky = "Whisky"
@@ -10,7 +10,7 @@ enum EngineKind: String, Codable, CaseIterable, Identifiable, Sendable {
 
     var preferenceRank: Int {
         switch self {
-        case .steamBridge: 0
+        case .managedWine: 0
         case .crossover: 1
         case .wine: 2
         case .whisky: 3
@@ -19,11 +19,32 @@ enum EngineKind: String, Codable, CaseIterable, Identifiable, Sendable {
 
     var status: String {
         switch self {
-        case .steamBridge: "Free · Recommended"
+        case .managedWine: "Free · Recommended"
         case .crossover: "Recommended"
         case .wine: "Advanced"
         case .whisky: "Unmaintained"
         }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        if value == "SteamBridge Wine" {
+            self = .managedWine
+            return
+        }
+        guard let kind = Self(rawValue: value) else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unknown compatibility engine: \(value)"
+            )
+        }
+        self = kind
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
     }
 }
 
