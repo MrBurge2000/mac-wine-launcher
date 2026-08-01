@@ -1,0 +1,1294 @@
+import AppKit
+import Darwin
+import Foundation
+
+enum Launcher {
+    enum WineICUArchitecture: Equatable {
+        case x86_64
+        case x86
+
+        var runtimeFolderName: String {
+            switch self {
+            case .x86_64: "x86_64"
+            case .x86: "x86"
+            }
+        }
+    }
+
+    static let steamInstallerURL = URL(string: "https://cdn.akamai.steamstatic.com/client/installer/SteamSetup.exe")!
+    static let minimumSteamInstallerSize = 1_000_000
+    static let dontPanicExecutableName = "Don't Panic! It is Just Turbulence.exe"
+    // Retained for advanced/legacy Wine installs. The managed Sikarugir runtime
+    // carries its own Steam-specific CEF fixes and must launch without these flags.
+    static let steamCompatibilityArguments = [
+        "-no-cef-sandbox",
+        "-cef-disable-gpu",
+        "-cef-disable-gpu-compositing",
+        "-cef-disable-gpu-sandbox",
+        "-cef-disable-occlusion",
+        "-cef-force-opaque-backgrounds"
+    ]
+    static let silentInstallerArguments = ["/S"]
+
+    static func installSteam(
+        in bottle: Bottle,
+        using engine: Engine,
+        progress: @escaping @MainActor @Sendable (SteamInstallProgress) -> Void = { _ in }
+    ) async throws {
+        if engine.kind == .crossover {
+            try openEngineApp(for: engine)
+            return
+        }
+        guard engine.kind != .whisky else {
+            throw LaunchError.guiEngine(
+                "Whisky is no longer maintained. SteamBridge Wine is the free recommended option."
+            )
+        }
+        await progress(.init(stage: .preparing, fraction: 0.02, detail: "Stopping old Steam processes…"))
+        try stopBottleProcesses(in: bottle, using: engine)
+
+        let installer = FileManager.default.temporaryDirectory
+            .appending(path: "\(UUID().uuidString)-SteamSetup.exe")
+        defer { try? FileManager.default.removeItem(at: installer) }
+        try await downloadSteamInstaller(to: installer, progress: progress)
+        try validateSteamInstaller(at: installer)
+
+        await progress(.init(
+            stage: .installing,
+            fraction: 0.62,
+            detail: "Installing Windows Steam. This usually takes 1–3 minutes…"
+        ))
+        try await runAndWait(
+            engine: engine,
+            bottle: bottle,
+            arguments: [installer.path] + silentInstallerArguments
+        )
+
+        guard isSteamInstalled(in: bottle) else {
+            throw LaunchError.steamMissingAfterInstall
+        }
+        await progress(.init(stage: .launching, fraction: 0.94, detail: "Opening Steam…"))
+        try launchSteam(in: bottle, using: engine)
+        await progress(.init(
+            stage: .ready,
+            fraction: 1,
+            detail: "Steam is installed; its updater is opening"
+        ))
+    }
+
+    static func launchSteam(
+        in bottle: Bottle,
+        using engine: Engine,
+        graphicsBackend: GraphicsBackend = .automatic,
+        displayProfile: DisplayProfile? = nil,
+        mouseCaptureProfile: MouseCaptureProfile = .menuSafe
+    ) throws {
+        if engine.kind == .crossover {
+            try openEngineApp(for: engine)
+            return
+        }
+        guard engine.kind != .whisky else {
+            NSWorkspace.shared.open(engine.executableURL)
+            return
+        }
+        let steamPath = steamExecutableURL(in: bottle).path
+        guard isSteamInstalled(in: bottle) else {
+            throw LaunchError.steamMissing
+        }
+        try repairSteamIntegrity(in: bottle, using: engine)
+        if let displayProfile {
+            try applyDisplayProfile(displayProfile, in: bottle, using: engine)
+        }
+        if isDontPanicInstalled(in: bottle) {
+            try applyGameInputProfile(
+                mouseCaptureProfile,
+                executableName: dontPanicExecutableName,
+                in: bottle,
+                using: engine
+            )
+        }
+        try run(
+            engine: engine,
+            bottle: bottle,
+            arguments: [steamPath] + steamArguments(for: engine),
+            graphicsBackend: graphicsBackend
+        )
+    }
+
+    static func waitForSteamUI(
+        in bottle: Bottle,
+        using engine: Engine,
+        timeout: Duration = .seconds(30)
+    ) async throws {
+        guard engine.kind != .crossover, engine.kind != .whisky else { return }
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        repeat {
+            if isWindowsProcessRunning(
+                named: "steamwebhelper.exe",
+                in: bottle,
+                using: engine
+            ) {
+                return
+            }
+            try await Task.sleep(for: .seconds(1))
+        } while clock.now < deadline
+        throw LaunchError.steamUIFailedToStart
+    }
+
+    static func taskListContainsProcess(_ output: String, named processName: String) -> Bool {
+        let expected = processName.lowercased()
+        return output
+            .components(separatedBy: .newlines)
+            .contains { line in
+                guard let firstColumn = line
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .split(whereSeparator: \.isWhitespace)
+                    .first else {
+                    return false
+                }
+                return firstColumn.lowercased() == expected
+            }
+    }
+
+    static func isWindowsProcessRunning(
+        named processName: String,
+        in bottle: Bottle,
+        using engine: Engine
+    ) -> Bool {
+        let process = configuredProcess(
+            engine: engine,
+            bottle: bottle,
+            arguments: [
+                "tasklist",
+                "/NH",
+                "/FI",
+                "IMAGENAME eq \(processName)"
+            ]
+        )
+        let output = Pipe()
+        process.standardOutput = output
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            guard process.terminationStatus == 0,
+                  let text = String(data: data, encoding: .utf8) else {
+                return false
+            }
+            return taskListContainsProcess(text, named: processName)
+        } catch {
+            return false
+        }
+    }
+
+    static func repairAndLaunchSteam(
+        in bottle: Bottle,
+        using engine: Engine,
+        graphicsBackend: GraphicsBackend = .automatic,
+        displayProfile: DisplayProfile? = nil,
+        mouseCaptureProfile: MouseCaptureProfile = .menuSafe
+    ) throws {
+        guard engine.kind != .crossover, engine.kind != .whisky else {
+            try launchSteam(
+                in: bottle,
+                using: engine,
+                graphicsBackend: graphicsBackend,
+                displayProfile: displayProfile,
+                mouseCaptureProfile: mouseCaptureProfile
+            )
+            return
+        }
+        try stopBottleProcesses(in: bottle, using: engine)
+        clearSteamWebCaches(in: bottle)
+        try launchSteam(
+            in: bottle,
+            using: engine,
+            graphicsBackend: graphicsBackend,
+            displayProfile: displayProfile,
+            mouseCaptureProfile: mouseCaptureProfile
+        )
+    }
+
+    static let supportedWindowsApplicationExtensions = Set([
+        "exe", "msi", "com", "bat", "cmd"
+    ])
+
+    static func windowsApplicationArguments(
+        for applicationURL: URL,
+        additionalArguments: [String] = []
+    ) throws -> [String] {
+        let fileExtension = applicationURL.pathExtension.lowercased()
+        guard supportedWindowsApplicationExtensions.contains(fileExtension) else {
+            throw LaunchError.unsupportedWindowsApplication
+        }
+        switch fileExtension {
+        case "msi":
+            return ["msiexec", "/i", applicationURL.path] + additionalArguments
+        case "bat", "cmd":
+            return ["cmd", "/c", applicationURL.path] + additionalArguments
+        default:
+            return [applicationURL.path] + additionalArguments
+        }
+    }
+
+    static func launchWindowsApplication(
+        at applicationURL: URL,
+        arguments: [String] = [],
+        in bottle: Bottle,
+        using engine: Engine,
+        graphicsBackend: GraphicsBackend = .automatic,
+        displayProfile: DisplayProfile? = nil
+    ) throws {
+        guard engine.kind != .crossover else {
+            throw LaunchError.guiEngine(
+                "Direct app launching is available with SteamBridge Wine or system Wine. Open CrossOver to run this file in a CrossOver bottle."
+            )
+        }
+        guard engine.kind != .whisky else {
+            throw LaunchError.guiEngine(
+                "Whisky is no longer maintained. Use SteamBridge Wine for direct Windows app launching."
+            )
+        }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(
+            atPath: applicationURL.path,
+            isDirectory: &isDirectory
+        ), !isDirectory.boolValue else {
+            throw LaunchError.windowsApplicationMissing
+        }
+        try removeLegacyGlobalWineICUIfNeeded(in: bottle, using: engine)
+        try installManagedWindowsComponentsIfNeeded(
+            for: applicationURL,
+            using: engine
+        )
+        if let displayProfile {
+            try applyDisplayProfile(displayProfile, in: bottle, using: engine)
+        }
+
+        let process = configuredProcess(
+            engine: engine,
+            bottle: bottle,
+            arguments: try windowsApplicationArguments(
+                for: applicationURL,
+                additionalArguments: arguments
+            ),
+            graphicsBackend: graphicsBackend
+        )
+        process.environment = windowsApplicationEnvironment(
+            for: applicationURL,
+            baseEnvironment: process.environment ?? [:]
+        )
+        process.currentDirectoryURL = applicationURL.deletingLastPathComponent()
+        try process.run()
+    }
+
+    static func windowsApplicationEnvironment(
+        for applicationURL: URL,
+        baseEnvironment: [String: String],
+        fileManager: FileManager = .default
+    ) -> [String: String] {
+        let applicationFolder = applicationURL.deletingLastPathComponent()
+        let packagedQtFolders = [
+            "_internal/PyQt6/Qt6",
+            "_internal/PySide6/Qt"
+        ]
+        guard packagedQtFolders.contains(where: {
+            fileManager.fileExists(
+                atPath: applicationFolder.appending(path: $0, directoryHint: .isDirectory).path
+            )
+        }) else {
+            return baseEnvironment
+        }
+
+        var environment = baseEnvironment
+        environment["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
+        let compatibilityFlags = ["--disable-gpu", "--disable-gpu-compositing"]
+        var flags = environment["QTWEBENGINE_CHROMIUM_FLAGS"]?
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init) ?? []
+        for flag in compatibilityFlags where !flags.contains(flag) {
+            flags.append(flag)
+        }
+        environment["QTWEBENGINE_CHROMIUM_FLAGS"] = flags.joined(separator: " ")
+        environment["QT_QUICK_BACKEND"] = "software"
+        environment["QT_OPENGL"] = "software"
+        return environment
+    }
+
+    static func installWineICU(
+        from sourceRoot: URL,
+        architecture: WineICUArchitecture,
+        into destination: URL,
+        fileManager: FileManager = .default
+    ) throws {
+        let source = sourceRoot.appending(
+            path: architecture.runtimeFolderName,
+            directoryHint: .isDirectory
+        )
+        let requiredFiles = ["icuuc72.dll", "icuin72.dll", "icudt72.dll"]
+        guard requiredFiles.allSatisfy({
+            fileManager.fileExists(atPath: source.appending(path: $0).path)
+        }) else {
+            throw LaunchError.windowsComponentsMissing
+        }
+        try fileManager.createDirectory(
+            at: destination,
+            withIntermediateDirectories: true
+        )
+        for fileName in requiredFiles {
+            try copyIfMissing(
+                source.appending(path: fileName),
+                to: destination.appending(path: fileName),
+                fileManager: fileManager
+            )
+        }
+        try copyIfMissing(
+            source.appending(path: "icuuc72.dll"),
+            to: destination.appending(path: "icuuc.dll"),
+            fileManager: fileManager
+        )
+        try copyIfMissing(
+            source.appending(path: "icuin72.dll"),
+            to: destination.appending(path: "icuin.dll"),
+            fileManager: fileManager
+        )
+    }
+
+    private static func installManagedWindowsComponentsIfNeeded(
+        for applicationURL: URL,
+        using engine: Engine,
+        fileManager: FileManager = .default
+    ) throws {
+        guard RuntimeInstaller.isCurrentRuntime(engine, fileManager: fileManager),
+              let qtBinaryDirectory = packagedQtBinaryDirectory(
+                for: applicationURL,
+                fileManager: fileManager
+              ),
+              let architecture = wineICUArchitecture(
+                of: qtBinaryDirectory.appending(path: "Qt6Core.dll")
+              ) else {
+            return
+        }
+        try installWineICU(
+            from: RuntimeInstaller.wineICURoot(fileManager: fileManager),
+            architecture: architecture,
+            into: qtBinaryDirectory,
+            fileManager: fileManager
+        )
+    }
+
+    static func packagedQtBinaryDirectory(
+        for applicationURL: URL,
+        fileManager: FileManager = .default
+    ) -> URL? {
+        let applicationFolder = applicationURL.deletingLastPathComponent()
+        let candidates = [
+            "_internal/PyQt6/Qt6/bin",
+            "_internal/PySide6/Qt/bin"
+        ]
+        return candidates
+            .map { applicationFolder.appending(path: $0, directoryHint: .isDirectory) }
+            .first {
+                fileManager.fileExists(
+                    atPath: $0.appending(path: "Qt6Core.dll").path
+                )
+            }
+    }
+
+    static func wineICUArchitecture(of executable: URL) -> WineICUArchitecture? {
+        guard let data = try? Data(contentsOf: executable, options: .mappedIfSafe),
+              data.count >= 64,
+              data[0] == 0x4d,
+              data[1] == 0x5a else {
+            return nil
+        }
+        let peOffset = data.withUnsafeBytes {
+            Int(UInt32(littleEndian: $0.loadUnaligned(
+                fromByteOffset: 0x3c,
+                as: UInt32.self
+            )))
+        }
+        guard peOffset >= 0,
+              peOffset + 6 <= data.count,
+              data[peOffset] == 0x50,
+              data[peOffset + 1] == 0x45,
+              data[peOffset + 2] == 0,
+              data[peOffset + 3] == 0 else {
+            return nil
+        }
+        let machine = data.withUnsafeBytes {
+            UInt16(littleEndian: $0.loadUnaligned(
+                fromByteOffset: peOffset + 4,
+                as: UInt16.self
+            ))
+        }
+        switch machine {
+        case 0x8664:
+            return .x86_64
+        case 0x014c:
+            return .x86
+        default:
+            return nil
+        }
+    }
+
+    static func repairSteamIntegrity(
+        in bottle: Bottle,
+        using engine: Engine,
+        fileManager: FileManager = .default
+    ) throws {
+        try removeLegacyGlobalWineICUIfNeeded(
+            in: bottle,
+            using: engine,
+            fileManager: fileManager
+        )
+        let steamDirectory = steamExecutableURL(in: bottle)
+            .deletingLastPathComponent()
+        try removeSteamUpdateInhibitor(
+            in: steamDirectory,
+            fileManager: fileManager
+        )
+        try restoreNewerSteamBootstrapBackup(
+            in: steamDirectory,
+            fileManager: fileManager
+        )
+    }
+
+    static func removeSteamUpdateInhibitor(
+        in steamDirectory: URL,
+        fileManager: FileManager = .default
+    ) throws {
+        let configuration = steamDirectory.appending(path: "steam.cfg")
+        guard let contents = try? String(contentsOf: configuration, encoding: .utf8) else {
+            return
+        }
+        let retainedLines = contents
+            .components(separatedBy: .newlines)
+            .filter {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased() != "bootstrapperinhibitall=enable"
+            }
+        guard retainedLines.count != contents.components(separatedBy: .newlines).count else {
+            return
+        }
+        let remaining = retainedLines
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if remaining.isEmpty {
+            try fileManager.moveItem(
+                at: configuration,
+                to: availableQuarantineURL(
+                    for: configuration,
+                    suffix: "disabled-by-steambridge",
+                    fileManager: fileManager
+                )
+            )
+        } else {
+            try (remaining.joined(separator: "\n") + "\n").write(
+                to: configuration,
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+    }
+
+    static func restoreNewerSteamBootstrapBackup(
+        in steamDirectory: URL,
+        fileManager: FileManager = .default
+    ) throws {
+        let current = steamDirectory.appending(path: "steam.exe")
+        let backup = steamDirectory.appending(path: "steam.exe.old")
+        guard fileManager.fileExists(atPath: current.path),
+              fileManager.fileExists(atPath: backup.path),
+              let currentDate = try? current.resourceValues(
+                forKeys: [.contentModificationDateKey]
+              ).contentModificationDate,
+              let backupDate = try? backup.resourceValues(
+                forKeys: [.contentModificationDateKey]
+              ).contentModificationDate,
+              backupDate > currentDate,
+              wineICUArchitecture(of: current) == .x86,
+              wineICUArchitecture(of: backup) == .x86 else {
+            return
+        }
+        let quarantine = availableQuarantineURL(
+            for: current,
+            suffix: "replaced-by-steambridge",
+            fileManager: fileManager
+        )
+        try fileManager.moveItem(at: current, to: quarantine)
+        do {
+            try fileManager.copyItem(at: backup, to: current)
+            try fileManager.setAttributes(
+                [.posixPermissions: 0o755],
+                ofItemAtPath: current.path
+            )
+        } catch {
+            try? fileManager.moveItem(at: quarantine, to: current)
+            throw error
+        }
+    }
+
+    private static func removeLegacyGlobalWineICUIfNeeded(
+        in bottle: Bottle,
+        using engine: Engine,
+        fileManager: FileManager = .default
+    ) throws {
+        guard RuntimeInstaller.isCurrentRuntime(engine, fileManager: fileManager) else {
+            return
+        }
+        let sourceRoot = RuntimeInstaller.wineICURoot(fileManager: fileManager)
+        let bottleRoot = URL(fileURLWithPath: bottle.path, isDirectory: true)
+        let mappings: [(WineICUArchitecture, String)] = [
+            (.x86_64, "system32"),
+            (.x86, "syswow64")
+        ]
+        let files = [
+            ("icuuc72.dll", "icuuc72.dll"),
+            ("icuin72.dll", "icuin72.dll"),
+            ("icudt72.dll", "icudt72.dll"),
+            ("icuuc72.dll", "icuuc.dll"),
+            ("icuin72.dll", "icuin.dll")
+        ]
+        for (architecture, systemDirectory) in mappings {
+            let source = sourceRoot.appending(
+                path: architecture.runtimeFolderName,
+                directoryHint: .isDirectory
+            )
+            let destination = bottleRoot.appending(
+                path: "drive_c/windows/\(systemDirectory)",
+                directoryHint: .isDirectory
+            )
+            for (sourceName, destinationName) in files {
+                let sourceFile = source.appending(path: sourceName)
+                let destinationFile = destination.appending(path: destinationName)
+                guard fileManager.fileExists(atPath: sourceFile.path),
+                      fileManager.fileExists(atPath: destinationFile.path),
+                      fileManager.contentsEqual(
+                        atPath: sourceFile.path,
+                        andPath: destinationFile.path
+                      ) else {
+                    continue
+                }
+                try fileManager.removeItem(at: destinationFile)
+            }
+        }
+    }
+
+    private static func availableQuarantineURL(
+        for item: URL,
+        suffix: String,
+        fileManager: FileManager
+    ) -> URL {
+        let base = item.appendingPathExtension(suffix)
+        guard fileManager.fileExists(atPath: base.path) else { return base }
+        var number = 2
+        while fileManager.fileExists(
+            atPath: base.appendingPathExtension(String(number)).path
+        ) {
+            number += 1
+        }
+        return base.appendingPathExtension(String(number))
+    }
+
+    private static func copyIfMissing(
+        _ source: URL,
+        to destination: URL,
+        fileManager: FileManager
+    ) throws {
+        guard !fileManager.fileExists(atPath: destination.path) else { return }
+        try fileManager.copyItem(at: source, to: destination)
+    }
+
+    static func clearSteamWebCaches(in bottle: Bottle) {
+        let prefixURL = URL(fileURLWithPath: bottle.path, isDirectory: true)
+        let usersURL = prefixURL.appending(path: "drive_c/users", directoryHint: .isDirectory)
+        if let users = try? FileManager.default.contentsOfDirectory(
+            at: usersURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) {
+            for userURL in users {
+                let cacheURL = userURL.appending(
+                    path: "AppData/Local/Steam/htmlcache",
+                    directoryHint: .isDirectory
+                )
+                try? FileManager.default.removeItem(at: cacheURL)
+            }
+        }
+
+        let legacyCacheURL = prefixURL.appending(
+            path: "drive_c/Program Files (x86)/Steam/config/htmlcache",
+            directoryHint: .isDirectory
+        )
+        try? FileManager.default.removeItem(at: legacyCacheURL)
+    }
+
+    static func steamExecutableURL(in bottle: Bottle) -> URL {
+        URL(fileURLWithPath: bottle.path, isDirectory: true)
+            .appending(path: "drive_c/Program Files (x86)/Steam/steam.exe")
+    }
+
+    static func isSteamInstalled(in bottle: Bottle, fileManager: FileManager = .default) -> Bool {
+        fileManager.isExecutableFile(atPath: steamExecutableURL(in: bottle).path)
+    }
+
+    static func dontPanicExecutableURL(in bottle: Bottle) -> URL {
+        URL(fileURLWithPath: bottle.path, isDirectory: true)
+            .appending(
+                path: "drive_c/Program Files (x86)/Steam/steamapps/common/Don't Panic! It is Just a Turbulence"
+            )
+            .appending(path: dontPanicExecutableName)
+    }
+
+    static func isDontPanicInstalled(
+        in bottle: Bottle,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        fileManager.isExecutableFile(atPath: dontPanicExecutableURL(in: bottle).path)
+    }
+
+    static func validateSteamInstaller(at url: URL) throws {
+        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+              let size = values.fileSize,
+              size >= minimumSteamInstallerSize,
+              let handle = try? FileHandle(forReadingFrom: url) else {
+            throw LaunchError.invalidInstaller
+        }
+        defer { try? handle.close() }
+        guard (try? handle.read(upToCount: 2)) == Data([0x4d, 0x5a]) else {
+            throw LaunchError.invalidInstaller
+        }
+    }
+
+    private static func downloadSteamInstaller(
+        to destination: URL,
+        progress: @escaping @MainActor @Sendable (SteamInstallProgress) -> Void
+    ) async throws {
+        await progress(.init(
+            stage: .connecting,
+            fraction: nil,
+            detail: "Connecting to Valve’s download server. This can take up to 30 seconds…"
+        ))
+        let downloader = SteamInstallerDownloadDelegate(
+            destination: destination,
+            progress: progress
+        )
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 60
+        configuration.timeoutIntervalForResource = 300
+        let session = URLSession(
+            configuration: configuration,
+            delegate: downloader,
+            delegateQueue: nil
+        )
+        defer { session.finishTasksAndInvalidate() }
+        try await downloader.download(steamInstallerURL, using: session)
+    }
+
+    private static func openEngineApp(for engine: Engine) throws {
+        var url = engine.executableURL
+        while url.pathExtension != "app", url.pathComponents.count > 1 {
+            url.deleteLastPathComponent()
+        }
+        guard url.pathExtension == "app", NSWorkspace.shared.open(url) else {
+            throw LaunchError.engineCouldNotOpen
+        }
+    }
+
+    private static func run(
+        engine: Engine,
+        bottle: Bottle,
+        arguments: [String],
+        graphicsBackend: GraphicsBackend = .wineD3D
+    ) throws {
+        let process = configuredProcess(
+            engine: engine,
+            bottle: bottle,
+            arguments: arguments,
+            graphicsBackend: graphicsBackend
+        )
+        process.environment = steamProcessEnvironment(
+            baseEnvironment: process.environment ?? [:]
+        )
+        try process.run()
+    }
+
+    static func steamProcessEnvironment(
+        baseEnvironment: [String: String]
+    ) -> [String: String] {
+        var environment = baseEnvironment
+        let cleanWindowManagerOverride = "dwmapi=b"
+        if let existing = environment["WINEDLLOVERRIDES"], !existing.isEmpty {
+            let overrides = existing
+                .split(separator: ";")
+                .map(String.init)
+                .filter {
+                    !$0.trimmingCharacters(in: .whitespaces)
+                        .lowercased()
+                        .hasPrefix("dwmapi=")
+                }
+            environment["WINEDLLOVERRIDES"] =
+                (overrides + [cleanWindowManagerOverride]).joined(separator: ";")
+        } else {
+            environment["WINEDLLOVERRIDES"] = cleanWindowManagerOverride
+        }
+        return environment
+    }
+
+    private static func runAndWait(
+        engine: Engine,
+        bottle: Bottle,
+        arguments: [String]
+    ) async throws {
+        try await Task.detached {
+            let process = configuredProcess(engine: engine, bottle: bottle, arguments: arguments)
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                throw LaunchError.installerFailed(process.terminationStatus)
+            }
+        }.value
+    }
+
+    private static func configuredProcess(
+        engine: Engine,
+        bottle: Bottle,
+        arguments: [String],
+        graphicsBackend: GraphicsBackend = .wineD3D
+    ) -> Process {
+        let process = Process()
+        process.executableURL = engine.executableURL
+        process.arguments = arguments
+        process.environment = configuredEnvironment(
+            engine: engine,
+            bottle: bottle,
+            graphicsBackend: graphicsBackend
+        )
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        return process
+    }
+
+    static func steamArguments(for engine: Engine) -> [String] {
+        isSikarugir(engine) ? [] : steamCompatibilityArguments
+    }
+
+    static func isSikarugir(_ engine: Engine) -> Bool {
+        engine.kind == .steamBridge &&
+            engine.executableURL.path.localizedCaseInsensitiveContains("Sikarugir")
+    }
+
+    static func configuredEnvironment(
+        engine: Engine,
+        bottle: Bottle,
+        graphicsBackend: GraphicsBackend = .wineD3D,
+        baseEnvironment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String: String] {
+        var environment = baseEnvironment
+        environment["WINEPREFIX"] = bottle.path
+        environment["WINEDEBUG"] = "-all"
+
+        guard isSikarugir(engine) else { return environment }
+
+        let bin = engine.executableURL.deletingLastPathComponent()
+        let bundle = bin.deletingLastPathComponent()
+        let runtime = bundle.deletingLastPathComponent()
+        let wineLibrary = bundle.appending(path: "lib/wine", directoryHint: .isDirectory)
+        let libraryPaths = [
+            runtime.appending(path: "Frameworks", directoryHint: .isDirectory).path,
+            runtime.path,
+            bundle.appending(path: "lib", directoryHint: .isDirectory).path
+        ]
+        let dllPaths = [
+            wineLibrary.appending(path: "x86_64-unix", directoryHint: .isDirectory).path,
+            wineLibrary.appending(path: "x86_64-windows", directoryHint: .isDirectory).path,
+            wineLibrary.appending(path: "i386-windows", directoryHint: .isDirectory).path
+        ]
+
+        environment["WINEESYNC"] = "1"
+        environment["WINEMSYNC"] = "1"
+        environment["PATH"] = joinedPath(bin.path, existing: environment["PATH"])
+        environment["DYLD_FALLBACK_LIBRARY_PATH"] = joinedPath(
+            libraryPaths.joined(separator: ":"),
+            existing: environment["DYLD_FALLBACK_LIBRARY_PATH"]
+        )
+        environment["WINEDLLPATH"] = joinedPath(
+            dllPaths.joined(separator: ":"),
+            existing: environment["WINEDLLPATH"]
+        )
+        applyGraphicsBackend(
+            graphicsBackend,
+            engine: engine,
+            environment: &environment
+        )
+        #if arch(arm64)
+        if ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 15 {
+            environment["ROSETTA_ADVERTISE_AVX"] = "1"
+        }
+        #endif
+        return environment
+    }
+
+    static func availableGraphicsBackends(
+        for engine: Engine,
+        fileManager: FileManager = .default
+    ) -> Set<GraphicsBackend> {
+        guard isSikarugir(engine) else { return [.automatic, .wineD3D] }
+        let rendererRoot = rendererRootURL(for: engine)
+        var result: Set<GraphicsBackend> = [.automatic, .wineD3D]
+        for backend in GraphicsBackend.allCases {
+            guard let folder = backend.rendererFolderName else { continue }
+            if backend == .d3dMetal,
+               (!isAppleSiliconProcess ||
+                   ProcessInfo.processInfo.operatingSystemVersion.majorVersion < 15) {
+                continue
+            }
+            if backend == .dxmt, !isAppleSiliconProcess {
+                continue
+            }
+            let renderer = rendererRoot.appending(path: folder, directoryHint: .isDirectory)
+            let requiredRelativePath: String
+            switch backend {
+            case .d3dMetal:
+                requiredRelativePath = "wine/x86_64-windows/d3d12.dll"
+            case .dxmt, .dxvk:
+                requiredRelativePath = "wine/x86_64-windows/d3d11.dll"
+            case .d9vk:
+                requiredRelativePath = "wine/x86_64-windows/d3d9.dll"
+            case .automatic, .wineD3D:
+                continue
+            }
+            if fileManager.fileExists(
+                atPath: renderer.appending(path: requiredRelativePath).path
+            ) {
+                result.insert(backend)
+            }
+        }
+        return result
+    }
+
+    static func resolvedGraphicsBackend(
+        _ requested: GraphicsBackend,
+        for engine: Engine,
+        isAppleSilicon: Bool = {
+            #if arch(arm64)
+            true
+            #else
+            false
+            #endif
+        }(),
+        operatingSystemMajorVersion: Int =
+            ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+        fileManager: FileManager = .default
+    ) -> GraphicsBackend {
+        let available = availableGraphicsBackends(for: engine, fileManager: fileManager)
+        if requested == .automatic {
+            return GraphicsBackend.recommended(
+                isAppleSilicon: isAppleSilicon,
+                operatingSystemMajorVersion: operatingSystemMajorVersion,
+                available: available
+            )
+        }
+        return available.contains(requested) ? requested : .wineD3D
+    }
+
+    static func displayRegistryArguments(for profile: DisplayProfile) -> [[String]] {
+        [
+            [
+                "reg", "add", "HKCU\\Software\\Wine\\Mac Driver",
+                "/v", "RetinaMode",
+                "/t", "REG_SZ",
+                "/d", profile.retinaModeRegistryValue,
+                "/f"
+            ],
+            [
+                "reg", "add", "HKCU\\Control Panel\\Desktop",
+                "/v", "LogPixels",
+                "/t", "REG_DWORD",
+                "/d", String(profile.windowsDPI),
+                "/f"
+            ]
+        ]
+    }
+
+    static func applyDisplayProfile(
+        _ profile: DisplayProfile,
+        in bottle: Bottle,
+        using engine: Engine
+    ) throws {
+        guard engine.kind != .crossover, engine.kind != .whisky else { return }
+        for arguments in displayRegistryArguments(for: profile) {
+            let process = configuredProcess(
+                engine: engine,
+                bottle: bottle,
+                arguments: arguments
+            )
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                throw LaunchError.displayConfigurationFailed(process.terminationStatus)
+            }
+        }
+    }
+
+    static func gameInputRegistryArguments(
+        for profile: MouseCaptureProfile,
+        executableName: String
+    ) -> [[String]] {
+        [
+            [
+                "reg", "add",
+                "HKCU\\Software\\Wine\\AppDefaults\\\(executableName)\\DirectInput",
+                "/v", "MouseWarpOverride",
+                "/t", "REG_SZ",
+                "/d", profile.wineRegistryValue,
+                "/f"
+            ]
+        ]
+    }
+
+    static func applyGameInputProfile(
+        _ profile: MouseCaptureProfile,
+        executableName: String,
+        in bottle: Bottle,
+        using engine: Engine
+    ) throws {
+        guard engine.kind != .crossover, engine.kind != .whisky else { return }
+        for arguments in gameInputRegistryArguments(
+            for: profile,
+            executableName: executableName
+        ) {
+            let process = configuredProcess(
+                engine: engine,
+                bottle: bottle,
+                arguments: arguments
+            )
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                throw LaunchError.inputConfigurationFailed(process.terminationStatus)
+            }
+        }
+    }
+
+    private static func rendererRootURL(for engine: Engine) -> URL {
+        let bin = engine.executableURL.deletingLastPathComponent()
+        let bundle = bin.deletingLastPathComponent()
+        let runtime = bundle.deletingLastPathComponent()
+        return runtime.appending(path: "Frameworks/renderer", directoryHint: .isDirectory)
+    }
+
+    private static func applyGraphicsBackend(
+        _ requested: GraphicsBackend,
+        engine: Engine,
+        environment: inout [String: String]
+    ) {
+        environment.removeValue(forKey: "WINEDLLPATH_PREPEND")
+        environment.removeValue(forKey: "CX_D3DMETALPATH")
+        environment.removeValue(forKey: "CX_APPLEGPT_LIBD3DSHARED_PATH")
+        environment.removeValue(forKey: "CX_APPLEGPTK_LIBD3DSHARED_PATH")
+        environment.removeValue(forKey: "DXMT_LOG_LEVEL")
+
+        let backend = resolvedGraphicsBackend(requested, for: engine)
+        guard let folder = backend.rendererFolderName else { return }
+
+        let renderer = rendererRootURL(for: engine)
+            .appending(path: folder, directoryHint: .isDirectory)
+        environment["WINEDLLPATH_PREPEND"] = renderer
+            .appending(path: "wine", directoryHint: .isDirectory).path
+
+        if backend == .d3dMetal {
+            let external = renderer.appending(path: "external", directoryHint: .isDirectory)
+            let sharedLibrary = external.appending(path: "libd3dshared.dylib").path
+            environment["CX_D3DMETALPATH"] = external.path
+            environment["CX_APPLEGPT_LIBD3DSHARED_PATH"] = sharedLibrary
+            environment["CX_APPLEGPTK_LIBD3DSHARED_PATH"] = sharedLibrary
+        } else if backend == .dxmt {
+            environment["DXMT_LOG_LEVEL"] = "none"
+        }
+    }
+
+    private static var isAppleSiliconProcess: Bool {
+        #if arch(arm64)
+        true
+        #else
+        false
+        #endif
+    }
+
+    private static func joinedPath(_ prefix: String, existing: String?) -> String {
+        guard let existing, !existing.isEmpty else { return prefix }
+        return prefix + ":" + existing
+    }
+
+    static func stopBottleProcesses(
+        in bottle: Bottle,
+        using engine: Engine,
+        gracefulTimeout: TimeInterval = 3,
+        terminationTimeout: TimeInterval = 2
+    ) throws {
+        let wineserver = engine.executableURL
+            .deletingLastPathComponent()
+            .appending(path: "wineserver")
+        if FileManager.default.isExecutableFile(atPath: wineserver.path) {
+            let process = Process()
+            process.executableURL = wineserver
+            process.arguments = ["-k"]
+            process.environment = configuredEnvironment(engine: engine, bottle: bottle)
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            _ = waitForProcess(process, timeout: gracefulTimeout)
+        }
+
+        var survivors = bottleProcessIDs(in: bottle, using: engine)
+        guard !survivors.isEmpty else { return }
+        signalBottleProcesses(survivors, signal: SIGTERM)
+        waitUntilBottleProcessesExit(
+            in: bottle,
+            using: engine,
+            timeout: terminationTimeout
+        )
+
+        survivors = bottleProcessIDs(in: bottle, using: engine)
+        guard !survivors.isEmpty else { return }
+        signalBottleProcesses(survivors, signal: SIGKILL)
+        waitUntilBottleProcessesExit(in: bottle, using: engine, timeout: 1)
+
+        survivors = bottleProcessIDs(in: bottle, using: engine)
+        guard survivors.isEmpty else {
+            throw LaunchError.bottleShutdownFailed(survivors.sorted())
+        }
+    }
+
+    static func bottleProcessIDs(in bottle: Bottle, using engine: Engine) -> Set<Int32> {
+        let bottleProcesses = processIDsReportedByLSOF(["-t", "+D", bottle.path])
+        guard !bottleProcesses.isEmpty else { return [] }
+        let wineserver = engine.executableURL
+            .deletingLastPathComponent()
+            .appending(path: "wineserver")
+        let engineProcesses = processIDsReportedByLSOF(["-t", engine.executableURL.path])
+            .union(processIDsReportedByLSOF(["-t", wineserver.path]))
+        return bottleProcesses.intersection(engineProcesses)
+    }
+
+    private static func processIDsReportedByLSOF(_ arguments: [String]) -> Set<Int32> {
+        let lsof = URL(fileURLWithPath: "/usr/sbin/lsof")
+        guard FileManager.default.isExecutableFile(atPath: lsof.path) else { return [] }
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = lsof
+        process.arguments = arguments
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            guard waitForProcess(process, timeout: 5) else { return [] }
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            guard let text = String(data: data, encoding: .utf8) else { return [] }
+            let ownPID = Int32(ProcessInfo.processInfo.processIdentifier)
+            return Set(text
+                .split(whereSeparator: \.isNewline)
+                .compactMap { Int32($0.trimmingCharacters(in: .whitespaces)) }
+                .filter { $0 > 1 && $0 != ownPID })
+        } catch {
+            return []
+        }
+    }
+
+    private static func signalBottleProcesses(_ processIDs: Set<Int32>, signal: Int32) {
+        for processID in processIDs {
+            Darwin.kill(processID, signal)
+        }
+    }
+
+    private static func waitUntilBottleProcessesExit(
+        in bottle: Bottle,
+        using engine: Engine,
+        timeout: TimeInterval
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            guard !bottleProcessIDs(in: bottle, using: engine).isEmpty else { return }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+    }
+
+    @discardableResult
+    private static func waitForProcess(
+        _ process: Process,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        guard process.isRunning else { return true }
+        process.terminate()
+        let terminationDeadline = Date().addingTimeInterval(0.5)
+        while process.isRunning, Date() < terminationDeadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if process.isRunning {
+            Darwin.kill(process.processIdentifier, SIGKILL)
+        }
+        return false
+    }
+
+    enum LaunchError: LocalizedError {
+        case downloadFailed
+        case invalidInstaller
+        case steamMissing
+        case steamMissingAfterInstall
+        case steamUIFailedToStart
+        case bottleShutdownFailed([Int32])
+        case engineCouldNotOpen
+        case installerFailed(Int32)
+        case displayConfigurationFailed(Int32)
+        case inputConfigurationFailed(Int32)
+        case unsupportedWindowsApplication
+        case windowsApplicationMissing
+        case windowsComponentsMissing
+        case guiEngine(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .downloadFailed: "Steam’s Windows installer could not be downloaded."
+            case .invalidInstaller: "The downloaded Steam installer was incomplete or invalid. Try again."
+            case .steamMissing: "Steam is not installed in this bottle yet."
+            case .steamMissingAfterInstall:
+                "The Steam installer finished, but Steam was not found. Try Install Windows Steam again."
+            case .steamUIFailedToStart:
+                "Steam started, but its interface did not open within 30 seconds. Other Windows apps were left running. Check the bottle’s Steam add-ons or use Fix Black Steam Window."
+            case .bottleShutdownFailed(let processIDs):
+                "SteamBridge could not stop Wine processes: \(processIDs.map(String.init).joined(separator: ", ")). Restart the Mac before launching this bottle again."
+            case .engineCouldNotOpen: "The compatibility engine could not be opened."
+            case .installerFailed(let status): "The Steam installer exited with status \(status)."
+            case .displayConfigurationFailed(let status):
+                "The Retina and Windows scaling settings could not be applied (status \(status))."
+            case .inputConfigurationFailed(let status):
+                "The game-specific mouse settings could not be applied (status \(status))."
+            case .unsupportedWindowsApplication:
+                "Choose a Windows .exe, .msi, .com, .bat, or .cmd file."
+            case .windowsApplicationMissing:
+                "The selected Windows application no longer exists at that location."
+            case .windowsComponentsMissing:
+                "Windows Unicode support is missing from the managed runtime. Run Update Free Runtime, then try again."
+            case .guiEngine(let message): message
+            }
+        }
+    }
+
+    struct SteamInstallProgress: Equatable, Sendable {
+        let stage: Stage
+        let fraction: Double?
+        let detail: String
+
+        enum Stage: String, Equatable, Sendable {
+            case preparing = "Preparing"
+            case connecting = "Connecting"
+            case downloading = "Downloading"
+            case installing = "Installing"
+            case launching = "Launching"
+            case ready = "Ready"
+        }
+    }
+}
+
+private final class SteamInstallerDownloadDelegate: NSObject, URLSessionDownloadDelegate,
+    @unchecked Sendable {
+    private let destination: URL
+    private let progress: @MainActor @Sendable (Launcher.SteamInstallProgress) -> Void
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, Error>?
+    private var didFinish = false
+
+    init(
+        destination: URL,
+        progress: @escaping @MainActor @Sendable (Launcher.SteamInstallProgress) -> Void
+    ) {
+        self.destination = destination
+        self.progress = progress
+    }
+
+    func download(_ url: URL, using session: URLSession) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            self.continuation = continuation
+            lock.unlock()
+            session.downloadTask(with: url).resume()
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        let hasTotal = totalBytesExpectedToWrite > 0
+        let downloadFraction = hasTotal
+            ? min(max(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite), 0), 1)
+            : nil
+        let overallFraction = downloadFraction.map { 0.05 + ($0 * 0.52) }
+        let downloaded = ByteCountFormatter.string(
+            fromByteCount: totalBytesWritten,
+            countStyle: .file
+        )
+        let detail: String
+        if hasTotal {
+            let total = ByteCountFormatter.string(
+                fromByteCount: totalBytesExpectedToWrite,
+                countStyle: .file
+            )
+            detail = "Steam installer: \(downloaded) of \(total)"
+        } else {
+            detail = "Steam installer: \(downloaded) downloaded"
+        }
+        Task { @MainActor [progress] in
+            progress(.init(stage: .downloading, fraction: overallFraction, detail: detail))
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        guard (downloadTask.response as? HTTPURLResponse)?.statusCode == 200 else {
+            finish(.failure(Launcher.LaunchError.downloadFailed))
+            return
+        }
+        do {
+            try FileManager.default.moveItem(at: location, to: destination)
+            finish(.success(()))
+        } catch {
+            finish(.failure(error))
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didCompleteWithError error: Error?
+    ) {
+        if let error {
+            finish(.failure(error))
+        }
+    }
+
+    private func finish(_ result: Result<Void, Error>) {
+        lock.lock()
+        guard !didFinish else {
+            lock.unlock()
+            return
+        }
+        didFinish = true
+        let continuation = continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(with: result)
+    }
+}

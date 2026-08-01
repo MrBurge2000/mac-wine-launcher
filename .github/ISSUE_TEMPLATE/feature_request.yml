@@ -1,0 +1,40 @@
+name: Feature request
+description: Propose an improvement to SteamBridge
+title: "[Feature]: "
+labels: [enhancement, needs-triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem should SteamBridge solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the smallest useful solution and alternatives considered.
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Area
+      options:
+        - Steam installation and launch
+        - Windows application launch
+        - Graphics and display
+        - Input and game compatibility
+        - Runtime installation
+        - Packaging and distribution
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety
+      options:
+        - label: This request does not require DRM, ownership, anti-cheat, or platform-security bypasses.
+          required: true
