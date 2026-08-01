@@ -14,9 +14,6 @@ No CrossOver subscription is required.
 [Visit the official website](https://mac-wine-launcher.angelo01px2028.chatgpt.site) for a quick overview,
 compatibility notes, and the latest verified download.
 
-This project was formerly called SteamBridge. The new name makes its purpose clear and
-avoids confusion with unrelated projects that already use that name.
-
 ## Download
 
 Download the current DMG or universal ZIP from [GitHub Releases](https://github.com/MrBurge2000/mac-wine-launcher/releases/latest).

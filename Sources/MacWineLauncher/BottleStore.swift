@@ -15,20 +15,12 @@ final class BottleStore: ObservableObject {
         applicationSupportURL: URL? = nil
     ) {
         self.fileManager = fileManager
-        let usesManagedRoot = rootURL == nil
         self.rootURL = rootURL ?? AppDataPaths.supportRoot(
             fileManager: fileManager,
             supportDirectory: applicationSupportURL
         )
         manifestURL = self.rootURL.appending(path: "bottles.json")
-        load(
-            migratingFrom: usesManagedRoot
-                ? AppDataPaths.legacySupportRoot(
-                    fileManager: fileManager,
-                    supportDirectory: applicationSupportURL
-                )
-                : nil
-        )
+        load()
     }
 
     func create(name: String, engine: EngineKind) throws -> Bottle {
@@ -57,25 +49,10 @@ final class BottleStore: ObservableObject {
         try save()
     }
 
-    private func load(migratingFrom legacyRoot: URL?) {
+    private func load() {
         guard let data = try? Data(contentsOf: manifestURL),
               let decoded = try? JSONDecoder().decode([Bottle].self, from: data) else { return }
-        guard let legacyRoot else {
-            bottles = decoded
-            return
-        }
-
-        let legacyPrefix = legacyRoot.standardizedFileURL.path + "/"
-        let currentPrefix = rootURL.standardizedFileURL.path + "/"
-        bottles = decoded.map { bottle in
-            guard bottle.path.hasPrefix(legacyPrefix) else { return bottle }
-            var migrated = bottle
-            migrated.path = currentPrefix + bottle.path.dropFirst(legacyPrefix.count)
-            return migrated
-        }
-        if bottles != decoded {
-            try? save()
-        }
+        bottles = decoded
     }
 
     private func save() throws {

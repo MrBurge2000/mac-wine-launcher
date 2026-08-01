@@ -3,11 +3,6 @@ import Foundation
 import Testing
 @testable import MacWineLauncher
 
-@Test func legacyEngineNameMigrates() throws {
-    let data = Data(#""SteamBridge Wine""#.utf8)
-    #expect(try JSONDecoder().decode(EngineKind.self, from: data) == .managedWine)
-}
-
 @Test func antiCheatIsBlocked() {
     let result = GameCompatibility.assess(title: "Example", notes: "Uses Easy Anti-Cheat")
     #expect(result.rating == .blocked)
@@ -508,26 +503,6 @@ private func peStub(machine: UInt16, marker: UInt8 = 0) -> Data {
     let created = try first.create(name: "Test", engine: .wine)
     let second = BottleStore(rootURL: root)
     #expect(second.bottles == [created])
-}
-
-@Test @MainActor func legacyApplicationSupportDataMigratesWithoutLosingBottles() throws {
-    let support = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: support) }
-    let legacyRoot = support.appending(path: "SteamBridge", directoryHint: .isDirectory)
-    let legacyBottle = legacyRoot.appending(path: "Bottles/Windows Steam")
-    try FileManager.default.createDirectory(at: legacyBottle, withIntermediateDirectories: true)
-
-    let bottle = Bottle(name: "Windows Steam", path: legacyBottle.path, engine: .managedWine)
-    let encoder = JSONEncoder()
-    try encoder.encode([bottle]).write(to: legacyRoot.appending(path: "bottles.json"))
-
-    let store = BottleStore(applicationSupportURL: support)
-    let currentRoot = support.appending(path: "Mac Wine Launcher", directoryHint: .isDirectory)
-
-    #expect(!FileManager.default.fileExists(atPath: legacyRoot.path))
-    #expect(FileManager.default.fileExists(atPath: currentRoot.path))
-    #expect(store.bottles.count == 1)
-    #expect(store.bottles[0].path == currentRoot.appending(path: "Bottles/Windows Steam").path)
 }
 
 @Test @MainActor func bottleStoreUninstallsBottleData() async throws {

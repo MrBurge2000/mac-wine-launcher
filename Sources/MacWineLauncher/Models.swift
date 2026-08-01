@@ -25,27 +25,6 @@ enum EngineKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .whisky: "Unmaintained"
         }
     }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        let value = try container.decode(String.self)
-        if value == "SteamBridge Wine" {
-            self = .managedWine
-            return
-        }
-        guard let kind = Self(rawValue: value) else {
-            throw DecodingError.dataCorruptedError(
-                in: container,
-                debugDescription: "Unknown compatibility engine: \(value)"
-            )
-        }
-        self = kind
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(rawValue)
-    }
 }
 
 struct Engine: Identifiable, Hashable, Sendable {
