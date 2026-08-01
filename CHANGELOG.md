@@ -8,6 +8,7 @@ All notable changes to Mac Wine Launcher are recorded here.
 
 - Completed a full product-identity audit across source, runtime metadata, packaging,
   installer artwork, documentation, website copy, and public release assets.
+- Introduced a completely original portal-and-apps icon across the app and website.
 - Rebuilt the drag-to-Applications installer artwork with Mac Wine Launcher branding.
 - Removed obsolete compatibility identifiers so new builds and managed data use only
   Mac Wine Launcher names.
