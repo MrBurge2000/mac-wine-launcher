@@ -1,9 +1,39 @@
 # SteamBridge
 
+[![CI](https://github.com/MrBurge2000/SteamBridge/actions/workflows/ci.yml/badge.svg)](https://github.com/MrBurge2000/SteamBridge/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/MrBurge2000/SteamBridge)](https://github.com/MrBurge2000/SteamBridge/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black)](https://github.com/MrBurge2000/SteamBridge/releases/latest)
+
 SteamBridge is a macOS launcher for Windows apps and the Windows version of Steam
 through an installed compatibility engine. It can download and manage its own free
 Wine runtime, create isolated bottles, launch EXE/MSI applications and installers,
 install Windows Steam, and launch it without CrossOver.
+
+## Download
+
+Download the current DMG or universal ZIP from [GitHub Releases](https://github.com/MrBurge2000/SteamBridge/releases/latest).
+Open the DMG and drag SteamBridge into Applications. The current community build is
+ad-hoc signed but not Apple-notarized, so macOS may require **Control-click → Open** on
+first launch. Never download SteamBridge from an unofficial mirror.
+
+## Highlights
+
+- Managed, isolated Wine bottles for Windows Steam and ordinary Windows applications
+- Free pinned Wine runtime with SHA-256 verification and visible installation progress
+- DirectX 9–12 renderer selection, Retina scaling, and executable-scoped game fixes
+- Automatic Steam UI health checks and recovery tools
+- Battery-safe shutdown that removes orphaned Wine and Steam helper processes
+- Universal macOS application for Apple Silicon and Intel
+
+## Project links
+
+- [Latest release](https://github.com/MrBurge2000/SteamBridge/releases/latest)
+- [Report a bug](https://github.com/MrBurge2000/SteamBridge/issues/new?template=bug_report.yml)
+- [Request a feature](https://github.com/MrBurge2000/SteamBridge/issues/new?template=feature_request.yml)
+- [Contributing guide](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)
 
 ## What it is (and is not)
 
@@ -124,3 +154,16 @@ the bottle. It keeps SteamBridge and the shared Wine runtime installed.
 SteamBridge validates the bottle path before deletion and refuses to remove anything
 outside its managed Bottles directory. Steam credentials are entered only in Steam,
 never in SteamBridge.
+
+## Contributing
+
+Community changes are welcome through forks and pull requests. The protected `main`
+branch cannot be changed directly; every proposed change remains a reviewable diff until
+the repository owner approves and merges it. Read [CONTRIBUTING.md](CONTRIBUTING.md)
+before opening a pull request.
+
+## License
+
+SteamBridge is available under the [MIT License](LICENSE). Steam and related trademarks
+belong to Valve Corporation. SteamBridge is an independent project and is not affiliated
+with or endorsed by Valve.

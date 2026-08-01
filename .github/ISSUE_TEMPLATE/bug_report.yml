@@ -1,0 +1,65 @@
+name: Bug report
+description: Report a reproducible SteamBridge problem
+title: "[Bug]: "
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include passwords, Steam session data, depot keys, or private paths. Report security issues privately through the Security tab.
+  - type: input
+    id: version
+    attributes:
+      label: SteamBridge version
+      placeholder: 0.5.5 (18)
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS and Mac
+      placeholder: macOS 15.6, Apple M2 Pro
+    validations:
+      required: true
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Compatibility engine
+      options:
+        - SteamBridge Wine
+        - CrossOver
+        - System Wine
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the expected behavior and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Open …
+        2. Click …
+        3. Observe …
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I removed credentials, account data, and private paths.
+          required: true
+        - label: I searched for an existing issue.
+          required: true
