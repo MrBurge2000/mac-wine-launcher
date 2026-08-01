@@ -185,6 +185,7 @@ private struct BottleDetail: View {
     @State private var isUninstalling = false
     @State private var showingUninstallConfirmation = false
     @State private var showingStopConfirmation = false
+    @State private var showingKnownGameFixDetails = false
     @State private var runtimeProgress: RuntimeInstaller.InstallProgress?
     @State private var steamProgress: Launcher.SteamInstallProgress?
     @State private var operationStatus: String?
@@ -410,26 +411,43 @@ private struct BottleDetail: View {
             }
 
             if Launcher.isDontPanicInstalled(in: bottle) {
-                Section("Don’t Panic! Mouse Fix") {
+                Section("Known Game Bugs & Fixes") {
                     Label(
-                        "Installed game detected",
-                        systemImage: "cursorarrow.motionlines"
+                        "1 automatic compatibility fix active",
+                        systemImage: "checkmark.shield.fill"
                     )
                     .foregroundStyle(.green)
-                    Picker("Mouse mode", selection: $mouseCaptureProfile) {
-                        ForEach(MouseCaptureProfile.allCases) { profile in
-                            Text(profile.title).tag(profile)
-                        }
-                    }
-                    Text(mouseCaptureProfile.summary)
-                        .foregroundStyle(.secondary)
-                    Button("Apply Mouse Fix & Relaunch Steam") {
-                        launch()
-                    }
-                    .disabled(engine == nil || isWorking)
-                    Text("SteamBridge applies this only to Don’t Panic—not to your other games. Menu-safe mode is applied automatically on every Steam launch. If the game ever captures the pointer again, press ⌥↩ to toggle window mode, then ⌘Tab back to SteamBridge.")
+                    Text("SteamBridge quietly applies known fixes only to affected games. No action is needed unless a problem returns.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    DisclosureGroup(
+                        "Troubleshooting details",
+                        isExpanded: $showingKnownGameFixDetails
+                    ) {
+                        LabeledContent(
+                            "Game",
+                            value: "Don’t Panic! It is Just Turbulence"
+                        )
+                        LabeledContent(
+                            "Known bug",
+                            value: "Pointer can become trapped after leaving the menu"
+                        )
+                        LabeledContent("Fix status", value: "Applied automatically")
+                        Picker("Mouse mode", selection: $mouseCaptureProfile) {
+                            ForEach(MouseCaptureProfile.allCases) { profile in
+                                Text(profile.title).tag(profile)
+                            }
+                        }
+                        Text(mouseCaptureProfile.summary)
+                            .foregroundStyle(.secondary)
+                        Button("Reapply Fix & Relaunch Steam") {
+                            launch()
+                        }
+                        .disabled(engine == nil || isWorking)
+                        Text("If the pointer becomes trapped again, press ⌥↩ to toggle window mode, then ⌘Tab back to SteamBridge and try another mouse mode here.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
@@ -496,7 +514,7 @@ private struct BottleDetail: View {
         }
         .onChange(of: mouseCaptureProfile) { _, newValue in
             UserDefaults.standard.set(newValue.rawValue, forKey: inputPreferenceKey)
-            operationStatus = "\(newValue.title) will be used for Don’t Panic the next time Steam launches."
+            operationStatus = "\(newValue.title) will be used for the known-game mouse fix the next time Steam launches."
         }
         .alert("Uninstall “\(bottle.name)”?", isPresented: $showingUninstallConfirmation) {
             Button("Cancel", role: .cancel) {}
@@ -569,11 +587,8 @@ private struct BottleDetail: View {
                     graphicsBackend,
                     for: readyEngine
                 )
-                let inputStatus = Launcher.isDontPanicInstalled(in: bottle)
-                    ? " Don’t Panic is using \(mouseCaptureProfile.title)."
-                    : ""
                 operationStatus =
-                    "Steam’s interface is running with \(resolved.title) and \(displayProfile.title).\(inputStatus)"
+                    "Steam’s interface is running with \(resolved.title) and \(displayProfile.title)."
             } catch {
                 operationStatus = nil
                 report(error.localizedDescription)

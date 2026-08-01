@@ -81,11 +81,10 @@ keeping the interface readable while exposing higher display resolutions to game
 Each game still controls its own fullscreen resolution; native Retina is sharpest,
 while a lower in-game resolution usually delivers better frame rate.
 
-Known game fixes are scoped to the affected executable. When
-**Don't Panic! It is Just Turbulence** is installed, SteamBridge automatically writes
-a menu-safe DirectInput mouse-warp override for that game only. The Input section can
-restore Wine's default behavior or force pointer capture for camera-heavy scenes
-without changing mouse behavior in any other game.
+Known game fixes are scoped to the affected executable and applied silently. When an
+installed title needs a game-specific input or graphics workaround, SteamBridge enables
+it automatically without changing other games. A collapsed **Known Game Bugs & Fixes**
+section exposes the affected title and manual fallbacks only for troubleshooting.
 
 No translation layer can guarantee every Windows game. Renderer-specific bugs,
 unsupported launchers, Windows driver requirements, DRM, and developer-disabled or
