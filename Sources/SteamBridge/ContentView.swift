@@ -3,7 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ContentView: View {
-    @StateObject private var store = BottleStore()
+    @ObservedObject var store: BottleStore
     @State private var engines = EngineDiscovery.discover()
     @State private var selection: Bottle.ID?
     @State private var showingNewBottle = false
@@ -184,6 +184,7 @@ private struct BottleDetail: View {
     @State private var isWorking = false
     @State private var isUninstalling = false
     @State private var showingUninstallConfirmation = false
+    @State private var showingStopConfirmation = false
     @State private var runtimeProgress: RuntimeInstaller.InstallProgress?
     @State private var steamProgress: Launcher.SteamInstallProgress?
     @State private var operationStatus: String?
@@ -192,6 +193,8 @@ private struct BottleDetail: View {
     @State private var mouseCaptureProfile: MouseCaptureProfile = .menuSafe
     @State private var windowsArguments = ""
     @State private var recentWindowsApplications: [RecentWindowsApplication] = []
+    @AppStorage(SteamBridgeAppDelegate.stopWineOnQuitKey)
+    private var stopWineOnQuit = true
 
     var body: some View {
         Form {
@@ -236,6 +239,18 @@ private struct BottleDetail: View {
                             isWorking ||
                             (engine?.kind != .crossover && !Launcher.isSteamInstalled(in: bottle))
                     )
+                    if engine?.kind == .steamBridge || engine?.kind == .wine {
+                        Button("Stop Steam & Wine…") {
+                            showingStopConfirmation = true
+                        }
+                        .disabled(isWorking)
+                    }
+                }
+                if engine?.kind == .steamBridge || engine?.kind == .wine {
+                    Toggle("Stop Steam and Wine when SteamBridge quits", isOn: $stopWineOnQuit)
+                    Text("Enabled by default so invisible Wine helpers cannot keep using CPU and battery after this app closes.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 if isWorking, steamProgress == nil, runtimeProgress == nil {
                     ProgressView("Preparing…")
@@ -491,6 +506,18 @@ private struct BottleDetail: View {
         } message: {
             Text("This permanently deletes Windows Steam, installed games, saves stored only inside this bottle, and all other bottle files. The shared runtime is not removed.")
         }
+        .confirmationDialog(
+            "Stop every Windows app in this bottle?",
+            isPresented: $showingStopConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Stop Steam & Wine", role: .destructive) {
+                stopSteamAndWine()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This closes Steam, games, SteaMidra, and every other Windows app currently running in this bottle.")
+        }
     }
 
     private func install() {
@@ -662,6 +689,26 @@ private struct BottleDetail: View {
                 report(error.localizedDescription)
             }
             runtimeProgress = nil
+            isWorking = false
+        }
+    }
+
+    private func stopSteamAndWine() {
+        guard let engine,
+              engine.kind != .crossover,
+              engine.kind != .whisky else { return }
+        operationStatus = "Stopping Steam and Wine…"
+        isWorking = true
+        Task {
+            do {
+                try await Task.detached {
+                    try Launcher.stopBottleProcesses(in: bottle, using: engine)
+                }.value
+                operationStatus = "Steam and every Wine process in this bottle are stopped."
+            } catch {
+                operationStatus = nil
+                report(error.localizedDescription)
+            }
             isWorking = false
         }
     }

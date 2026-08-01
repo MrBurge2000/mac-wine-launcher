@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Testing
 @testable import SteamBridge
@@ -238,6 +239,78 @@ import Testing
 
     #expect(environment["WINEDLLOVERRIDES"] == "mscoree=;mshtml=;dwmapi=b")
     #expect(environment["KEEP_ME"] == "yes")
+}
+
+@Test func bottleShutdownForceStopsAProcessThatIgnoresTermination() throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let bottle = Bottle(name: "Shutdown Test", path: root.path, engine: .wine)
+    let engine = Engine(
+        kind: .wine,
+        executableURL: URL(fileURLWithPath: "/bin/zsh")
+    )
+    let stubbornProcess = Process()
+    stubbornProcess.executableURL = URL(fileURLWithPath: "/bin/zsh")
+    stubbornProcess.arguments = ["-c", "trap '' TERM; while true; do :; done"]
+    stubbornProcess.currentDirectoryURL = root
+    stubbornProcess.standardOutput = FileHandle.nullDevice
+    stubbornProcess.standardError = FileHandle.nullDevice
+    try stubbornProcess.run()
+    defer {
+        if stubbornProcess.isRunning {
+            Darwin.kill(stubbornProcess.processIdentifier, SIGKILL)
+        }
+    }
+    Thread.sleep(forTimeInterval: 0.1)
+
+    #expect(Launcher.bottleProcessIDs(
+        in: bottle,
+        using: engine
+    ).contains(stubbornProcess.processIdentifier))
+    try Launcher.stopBottleProcesses(
+        in: bottle,
+        using: engine,
+        gracefulTimeout: 0.1,
+        terminationTimeout: 0.2
+    )
+    stubbornProcess.waitUntilExit()
+
+    #expect(!stubbornProcess.isRunning)
+    #expect(!Launcher.bottleProcessIDs(
+        in: bottle,
+        using: engine
+    ).contains(stubbornProcess.processIdentifier))
+}
+
+@Test func bottleShutdownDoesNotStopAnUnrelatedNativeProcess() throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let bottle = Bottle(name: "Scoped Shutdown Test", path: root.path, engine: .wine)
+    let engine = Engine(
+        kind: .wine,
+        executableURL: root.appending(path: "missing-runtime/bin/wine")
+    )
+    let nativeProcess = Process()
+    nativeProcess.executableURL = URL(fileURLWithPath: "/bin/sleep")
+    nativeProcess.arguments = ["30"]
+    nativeProcess.currentDirectoryURL = root
+    try nativeProcess.run()
+    defer {
+        if nativeProcess.isRunning {
+            Darwin.kill(nativeProcess.processIdentifier, SIGKILL)
+        }
+    }
+
+    try Launcher.stopBottleProcesses(
+        in: bottle,
+        using: engine,
+        gracefulTimeout: 0.1,
+        terminationTimeout: 0.1
+    )
+
+    #expect(nativeProcess.isRunning)
 }
 
 @Test func nonQtWindowsAppsKeepTheirEnvironment() {

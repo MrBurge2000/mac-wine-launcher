@@ -100,6 +100,14 @@ SteamBridge waits for `steamwebhelper.exe` and reports a clear failure if the in
 does not appear within 30 seconds. The explicit black-window repair remains available
 for the rare case where Steam's web cache genuinely needs to be rebuilt.
 
+SteamBridge 0.5.4 also owns the shutdown lifecycle of its managed bottles. Closing the
+last SteamBridge window or choosing Quit stops Steam and Wine by default. Shutdown first
+asks the bottle's `wineserver` to exit, then terminates and finally force-stops only
+processes proven to have files open inside that bottle. This prevents detached
+`steamwebhelper.exe` and `wineserver` processes from silently consuming CPU and battery.
+The Steam section includes a visible **Stop Steam & Wine** button and an opt-out toggle
+for users who intentionally want their Windows apps to continue after SteamBridge quits.
+
 **Install Windows Steam** downloads a fresh copy of Valve's official installer every
 time, validates that the download is a complete Windows executable, shows download and
 installation progress, stops conflicting bottle processes, verifies that Steam was

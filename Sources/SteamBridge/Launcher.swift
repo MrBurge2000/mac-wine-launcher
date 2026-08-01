@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 
 enum Launcher {
@@ -1021,19 +1022,118 @@ enum Launcher {
         return prefix + ":" + existing
     }
 
-    static func stopBottleProcesses(in bottle: Bottle, using engine: Engine) throws {
+    static func stopBottleProcesses(
+        in bottle: Bottle,
+        using engine: Engine,
+        gracefulTimeout: TimeInterval = 3,
+        terminationTimeout: TimeInterval = 2
+    ) throws {
         let wineserver = engine.executableURL
             .deletingLastPathComponent()
             .appending(path: "wineserver")
-        guard FileManager.default.isExecutableFile(atPath: wineserver.path) else { return }
+        if FileManager.default.isExecutableFile(atPath: wineserver.path) {
+            let process = Process()
+            process.executableURL = wineserver
+            process.arguments = ["-k"]
+            process.environment = configuredEnvironment(engine: engine, bottle: bottle)
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            _ = waitForProcess(process, timeout: gracefulTimeout)
+        }
+
+        var survivors = bottleProcessIDs(in: bottle, using: engine)
+        guard !survivors.isEmpty else { return }
+        signalBottleProcesses(survivors, signal: SIGTERM)
+        waitUntilBottleProcessesExit(
+            in: bottle,
+            using: engine,
+            timeout: terminationTimeout
+        )
+
+        survivors = bottleProcessIDs(in: bottle, using: engine)
+        guard !survivors.isEmpty else { return }
+        signalBottleProcesses(survivors, signal: SIGKILL)
+        waitUntilBottleProcessesExit(in: bottle, using: engine, timeout: 1)
+
+        survivors = bottleProcessIDs(in: bottle, using: engine)
+        guard survivors.isEmpty else {
+            throw LaunchError.bottleShutdownFailed(survivors.sorted())
+        }
+    }
+
+    static func bottleProcessIDs(in bottle: Bottle, using engine: Engine) -> Set<Int32> {
+        let bottleProcesses = processIDsReportedByLSOF(["-t", "+D", bottle.path])
+        guard !bottleProcesses.isEmpty else { return [] }
+        let wineserver = engine.executableURL
+            .deletingLastPathComponent()
+            .appending(path: "wineserver")
+        let engineProcesses = processIDsReportedByLSOF(["-t", engine.executableURL.path])
+            .union(processIDsReportedByLSOF(["-t", wineserver.path]))
+        return bottleProcesses.intersection(engineProcesses)
+    }
+
+    private static func processIDsReportedByLSOF(_ arguments: [String]) -> Set<Int32> {
+        let lsof = URL(fileURLWithPath: "/usr/sbin/lsof")
+        guard FileManager.default.isExecutableFile(atPath: lsof.path) else { return [] }
         let process = Process()
-        process.executableURL = wineserver
-        process.arguments = ["-k"]
-        process.environment = configuredEnvironment(engine: engine, bottle: bottle)
-        process.standardOutput = FileHandle.nullDevice
+        let output = Pipe()
+        process.executableURL = lsof
+        process.arguments = arguments
+        process.standardOutput = output
         process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
+        do {
+            try process.run()
+            guard waitForProcess(process, timeout: 5) else { return [] }
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            guard let text = String(data: data, encoding: .utf8) else { return [] }
+            let ownPID = Int32(ProcessInfo.processInfo.processIdentifier)
+            return Set(text
+                .split(whereSeparator: \.isNewline)
+                .compactMap { Int32($0.trimmingCharacters(in: .whitespaces)) }
+                .filter { $0 > 1 && $0 != ownPID })
+        } catch {
+            return []
+        }
+    }
+
+    private static func signalBottleProcesses(_ processIDs: Set<Int32>, signal: Int32) {
+        for processID in processIDs {
+            Darwin.kill(processID, signal)
+        }
+    }
+
+    private static func waitUntilBottleProcessesExit(
+        in bottle: Bottle,
+        using engine: Engine,
+        timeout: TimeInterval
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            guard !bottleProcessIDs(in: bottle, using: engine).isEmpty else { return }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+    }
+
+    @discardableResult
+    private static func waitForProcess(
+        _ process: Process,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        guard process.isRunning else { return true }
+        process.terminate()
+        let terminationDeadline = Date().addingTimeInterval(0.5)
+        while process.isRunning, Date() < terminationDeadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if process.isRunning {
+            Darwin.kill(process.processIdentifier, SIGKILL)
+        }
+        return false
     }
 
     enum LaunchError: LocalizedError {
@@ -1042,6 +1142,7 @@ enum Launcher {
         case steamMissing
         case steamMissingAfterInstall
         case steamUIFailedToStart
+        case bottleShutdownFailed([Int32])
         case engineCouldNotOpen
         case installerFailed(Int32)
         case displayConfigurationFailed(Int32)
@@ -1060,6 +1161,8 @@ enum Launcher {
                 "The Steam installer finished, but Steam was not found. Try Install Windows Steam again."
             case .steamUIFailedToStart:
                 "Steam started, but its interface did not open within 30 seconds. Other Windows apps were left running. Check the bottle’s Steam add-ons or use Fix Black Steam Window."
+            case .bottleShutdownFailed(let processIDs):
+                "SteamBridge could not stop Wine processes: \(processIDs.map(String.init).joined(separator: ", ")). Restart the Mac before launching this bottle again."
             case .engineCouldNotOpen: "The compatibility engine could not be opened."
             case .installerFailed(let status): "The Steam installer exited with status \(status)."
             case .displayConfigurationFailed(let status):
