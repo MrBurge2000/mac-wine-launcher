@@ -52,7 +52,25 @@ final class BottleStore: ObservableObject {
     private func load() {
         guard let data = try? Data(contentsOf: manifestURL),
               let decoded = try? JSONDecoder().decode([Bottle].self, from: data) else { return }
-        bottles = decoded
+        let currentPrefix = rootURL.standardizedFileURL.path + "/"
+        bottles = decoded.map { bottle in
+            guard !bottle.path.hasPrefix(currentPrefix),
+                  let range = bottle.path.range(of: "/Bottles/") else {
+                return bottle
+            }
+            let relativePath = String(bottle.path[range.upperBound...])
+            let candidate = rootURL.appending(
+                path: "Bottles/\(relativePath)",
+                directoryHint: .isDirectory
+            )
+            guard fileManager.fileExists(atPath: candidate.path) else { return bottle }
+            var migrated = bottle
+            migrated.path = candidate.path
+            return migrated
+        }
+        if bottles != decoded {
+            try? save()
+        }
     }
 
     private func save() throws {

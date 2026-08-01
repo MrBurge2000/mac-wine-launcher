@@ -3,6 +3,11 @@ import Foundation
 import Testing
 @testable import MacWineLauncher
 
+@Test func priorManagedEngineNamesMigrate() throws {
+    let data = Data(#""Prior Launcher Wine""#.utf8)
+    #expect(try JSONDecoder().decode(EngineKind.self, from: data) == .managedWine)
+}
+
 @Test func antiCheatIsBlocked() {
     let result = GameCompatibility.assess(title: "Example", notes: "Uses Easy Anti-Cheat")
     #expect(result.rating == .blocked)
@@ -503,6 +508,31 @@ private func peStub(machine: UInt16, marker: UInt8 = 0) -> Data {
     let created = try first.create(name: "Test", engine: .wine)
     let second = BottleStore(rootURL: root)
     #expect(second.bottles == [created])
+}
+
+@Test @MainActor func structurallyRecognizedDataMigratesWithoutLosingBottles() throws {
+    let support = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: support) }
+    let priorRoot = support.appending(path: "Prior Launcher", directoryHint: .isDirectory)
+    let priorBottle = priorRoot.appending(path: "Bottles/Windows Steam", directoryHint: .isDirectory)
+    let runtime = priorRoot.appending(
+        path: "Runtime/Sikarugir/wswine.bundle",
+        directoryHint: .isDirectory
+    )
+    try FileManager.default.createDirectory(at: priorBottle, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: runtime, withIntermediateDirectories: true)
+
+    let bottle = Bottle(name: "Windows Steam", path: priorBottle.path, engine: .managedWine)
+    let encoder = JSONEncoder()
+    try encoder.encode([bottle]).write(to: priorRoot.appending(path: "bottles.json"))
+
+    let store = BottleStore(applicationSupportURL: support)
+    let currentRoot = support.appending(path: "Mac Wine Launcher", directoryHint: .isDirectory)
+
+    #expect(!FileManager.default.fileExists(atPath: priorRoot.path))
+    #expect(FileManager.default.fileExists(atPath: currentRoot.path))
+    #expect(store.bottles.count == 1)
+    #expect(store.bottles[0].path == currentRoot.appending(path: "Bottles/Windows Steam").path)
 }
 
 @Test @MainActor func bottleStoreUninstallsBottleData() async throws {

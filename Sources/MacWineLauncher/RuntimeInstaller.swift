@@ -408,6 +408,16 @@ enum RuntimeInstaller {
             to: runtimeRoot.appending(path: versionFileName),
             options: .atomic
         )
+        if let entries = try? FileManager.default.contentsOfDirectory(
+            at: runtimeRoot,
+            includingPropertiesForKeys: nil
+        ) {
+            for entry in entries where entry.lastPathComponent != versionFileName &&
+                entry.lastPathComponent.hasPrefix(".") &&
+                entry.lastPathComponent.hasSuffix("runtime-version") {
+                try? FileManager.default.removeItem(at: entry)
+            }
+        }
     }
 
     private static func replaceRuntime(
