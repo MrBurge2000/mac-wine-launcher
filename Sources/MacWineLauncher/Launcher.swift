@@ -18,6 +18,9 @@ enum Launcher {
     static let steamInstallerURL = URL(string: "https://cdn.akamai.steamstatic.com/client/installer/SteamSetup.exe")!
     static let minimumSteamInstallerSize = 1_000_000
     static let dontPanicExecutableName = "Don't Panic! It is Just Turbulence.exe"
+    static let cyberpunkSteamAppID = "1091500"
+    static let cyberpunkExecutableName = "Cyberpunk2077.exe"
+    static let cyberpunkLaunchArguments = ["--launcher-skip"]
     // Retained for advanced/legacy Wine installs. The managed Sikarugir runtime
     // carries its own Steam-specific CEF fixes and must launch without these flags.
     static let steamCompatibilityArguments = [
@@ -121,11 +124,42 @@ enum Launcher {
         timeout: Duration = .seconds(30)
     ) async throws {
         guard engine.kind != .crossover, engine.kind != .whisky else { return }
+        try await waitForWindowsProcess(
+            named: "steamwebhelper.exe",
+            in: bottle,
+            using: engine,
+            timeout: timeout,
+            failure: .steamUIFailedToStart
+        )
+    }
+
+    static func waitForCyberpunk(
+        in bottle: Bottle,
+        using engine: Engine,
+        timeout: Duration = .seconds(120)
+    ) async throws {
+        guard engine.kind != .crossover, engine.kind != .whisky else { return }
+        try await waitForWindowsProcess(
+            named: cyberpunkExecutableName,
+            in: bottle,
+            using: engine,
+            timeout: timeout,
+            failure: .cyberpunkFailedToStart
+        )
+    }
+
+    private static func waitForWindowsProcess(
+        named processName: String,
+        in bottle: Bottle,
+        using engine: Engine,
+        timeout: Duration,
+        failure: LaunchError
+    ) async throws {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: timeout)
         repeat {
             if isWindowsProcessRunning(
-                named: "steamwebhelper.exe",
+                named: processName,
                 in: bottle,
                 using: engine
             ) {
@@ -133,7 +167,7 @@ enum Launcher {
             }
             try await Task.sleep(for: .seconds(1))
         } while clock.now < deadline
-        throw LaunchError.steamUIFailedToStart
+        throw failure
     }
 
     static func taskListContainsProcess(_ output: String, named processName: String) -> Bool {
@@ -301,6 +335,12 @@ enum Launcher {
             return baseEnvironment
         }
 
+        return qtSoftwareRenderingEnvironment(baseEnvironment: baseEnvironment)
+    }
+
+    static func qtSoftwareRenderingEnvironment(
+        baseEnvironment: [String: String]
+    ) -> [String: String] {
         var environment = baseEnvironment
         environment["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
         let compatibilityFlags = ["--disable-gpu", "--disable-gpu-compositing"]
@@ -648,6 +688,56 @@ enum Launcher {
         fileManager.isExecutableFile(atPath: dontPanicExecutableURL(in: bottle).path)
     }
 
+    static func cyberpunkExecutableURL(in bottle: Bottle) -> URL {
+        URL(fileURLWithPath: bottle.path, isDirectory: true)
+            .appending(
+                path: "drive_c/Program Files (x86)/Steam/steamapps/common/Cyberpunk 2077/bin/x64",
+                directoryHint: .isDirectory
+            )
+            .appending(path: cyberpunkExecutableName)
+    }
+
+    static func isCyberpunkInstalled(
+        in bottle: Bottle,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        fileManager.isExecutableFile(atPath: cyberpunkExecutableURL(in: bottle).path)
+    }
+
+    static func steamGameArguments(
+        appID: String,
+        additionalArguments: [String] = []
+    ) -> [String] {
+        ["-applaunch", appID] + additionalArguments
+    }
+
+    static func launchCyberpunk(
+        in bottle: Bottle,
+        using engine: Engine,
+        graphicsBackend: GraphicsBackend = .automatic,
+        displayProfile: DisplayProfile? = nil
+    ) throws {
+        guard isSteamInstalled(in: bottle) else {
+            throw LaunchError.steamMissing
+        }
+        guard isCyberpunkInstalled(in: bottle) else {
+            throw LaunchError.cyberpunkMissing
+        }
+        try repairSteamIntegrity(in: bottle, using: engine)
+        if let displayProfile {
+            try applyDisplayProfile(displayProfile, in: bottle, using: engine)
+        }
+        try run(
+            engine: engine,
+            bottle: bottle,
+            arguments: [steamExecutableURL(in: bottle).path] + steamGameArguments(
+                appID: cyberpunkSteamAppID,
+                additionalArguments: cyberpunkLaunchArguments
+            ),
+            graphicsBackend: graphicsBackend
+        )
+    }
+
     static func validateSteamInstaller(at url: URL) throws {
         guard let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
               let size = values.fileSize,
@@ -717,7 +807,9 @@ enum Launcher {
     static func steamProcessEnvironment(
         baseEnvironment: [String: String]
     ) -> [String: String] {
-        var environment = baseEnvironment
+        var environment = qtSoftwareRenderingEnvironment(
+            baseEnvironment: baseEnvironment
+        )
         let cleanWindowManagerOverride = "dwmapi=b"
         if let existing = environment["WINEDLLOVERRIDES"], !existing.isEmpty {
             let overrides = existing
@@ -1142,6 +1234,8 @@ enum Launcher {
         case steamMissing
         case steamMissingAfterInstall
         case steamUIFailedToStart
+        case cyberpunkMissing
+        case cyberpunkFailedToStart
         case bottleShutdownFailed([Int32])
         case engineCouldNotOpen
         case installerFailed(Int32)
@@ -1161,6 +1255,10 @@ enum Launcher {
                 "The Steam installer finished, but Steam was not found. Try Install Windows Steam again."
             case .steamUIFailedToStart:
                 "Steam started, but its interface did not open within 30 seconds. Other Windows apps were left running. Check the bottle’s Steam add-ons or use Fix Black Steam Window."
+            case .cyberpunkMissing:
+                "Cyberpunk 2077 is not installed in this Steam bottle."
+            case .cyberpunkFailedToStart:
+                "Steam received the Cyberpunk 2077 launch request, but the game process did not appear within two minutes. Steam and other Windows apps were left running."
             case .bottleShutdownFailed(let processIDs):
                 "Mac Wine Launcher could not stop Wine processes: \(processIDs.map(String.init).joined(separator: ", ")). Restart the Mac before launching this bottle again."
             case .engineCouldNotOpen: "The compatibility engine could not be opened."

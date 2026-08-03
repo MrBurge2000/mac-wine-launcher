@@ -244,6 +244,36 @@ import Testing
 
     #expect(environment["WINEDLLOVERRIDES"] == "mscoree=;mshtml=;dwmapi=b")
     #expect(environment["KEEP_ME"] == "yes")
+    #expect(environment["QT_QUICK_BACKEND"] == "software")
+    #expect(environment["QT_OPENGL"] == "software")
+    #expect(environment["QTWEBENGINE_DISABLE_SANDBOX"] == "1")
+    #expect(environment["QTWEBENGINE_CHROMIUM_FLAGS"]?.contains("--disable-gpu") == true)
+}
+
+@Test func cyberpunkSteamLaunchSkipsTheBrokenLauncher() {
+    #expect(Launcher.cyberpunkSteamAppID == "1091500")
+    #expect(Launcher.steamGameArguments(
+        appID: Launcher.cyberpunkSteamAppID,
+        additionalArguments: Launcher.cyberpunkLaunchArguments
+    ) == ["-applaunch", "1091500", "--launcher-skip"])
+}
+
+@Test func cyberpunkDetectionRequiresTheGameExecutable() throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let bottle = Bottle(name: "Test", path: root.path, engine: .managedWine)
+    let executable = Launcher.cyberpunkExecutableURL(in: bottle)
+    try FileManager.default.createDirectory(
+        at: executable.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    #expect(!Launcher.isCyberpunkInstalled(in: bottle))
+    try Data("game".utf8).write(to: executable)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: executable.path
+    )
+    #expect(Launcher.isCyberpunkInstalled(in: bottle))
 }
 
 @Test func bottleShutdownForceStopsAProcessThatIgnoresTermination() throws {

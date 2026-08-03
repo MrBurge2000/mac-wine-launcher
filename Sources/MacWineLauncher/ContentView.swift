@@ -410,46 +410,7 @@ private struct BottleDetail: View {
                     .foregroundStyle(.secondary)
             }
 
-            if Launcher.isDontPanicInstalled(in: bottle) {
-                Section("Known Game Bugs & Fixes") {
-                    Label(
-                        "1 automatic compatibility fix active",
-                        systemImage: "checkmark.shield.fill"
-                    )
-                    .foregroundStyle(.green)
-                    Text("Mac Wine Launcher quietly applies known fixes only to affected games. No action is needed unless a problem returns.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    DisclosureGroup(
-                        "Troubleshooting details",
-                        isExpanded: $showingKnownGameFixDetails
-                    ) {
-                        LabeledContent(
-                            "Game",
-                            value: "Don’t Panic! It is Just Turbulence"
-                        )
-                        LabeledContent(
-                            "Known bug",
-                            value: "Pointer can become trapped after leaving the menu"
-                        )
-                        LabeledContent("Fix status", value: "Applied automatically")
-                        Picker("Mouse mode", selection: $mouseCaptureProfile) {
-                            ForEach(MouseCaptureProfile.allCases) { profile in
-                                Text(profile.title).tag(profile)
-                            }
-                        }
-                        Text(mouseCaptureProfile.summary)
-                            .foregroundStyle(.secondary)
-                        Button("Reapply Fix & Relaunch Steam") {
-                            launch()
-                        }
-                        .disabled(engine == nil || isWorking)
-                        Text("If the pointer becomes trapped again, press ⌥↩ to toggle window mode, then ⌘Tab back to Mac Wine Launcher and try another mouse mode here.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
+            knownGameFixesSection
 
             Section("Game Profile Helper") {
                 TextField("Game title", text: $title)
@@ -538,6 +499,74 @@ private struct BottleDetail: View {
         }
     }
 
+    @ViewBuilder
+    private var knownGameFixesSection: some View {
+        if knownGameFixCount > 0 {
+            Section("Known Game Bugs & Fixes") {
+                Label(
+                    "\(knownGameFixCount) automatic compatibility \(knownGameFixCount == 1 ? "fix" : "fixes") active",
+                    systemImage: "checkmark.shield.fill"
+                )
+                .foregroundStyle(.green)
+                Text("Mac Wine Launcher quietly applies known fixes only to affected games. No action is needed unless a problem returns.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                DisclosureGroup(
+                    "Troubleshooting details",
+                    isExpanded: $showingKnownGameFixDetails
+                ) {
+                    dontPanicFixDetails
+                    cyberpunkFixDetails
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var dontPanicFixDetails: some View {
+        if Launcher.isDontPanicInstalled(in: bottle) {
+            LabeledContent("Game", value: "Don’t Panic! It is Just Turbulence")
+            LabeledContent(
+                "Known bug",
+                value: "Pointer can become trapped after leaving the menu"
+            )
+            LabeledContent("Fix status", value: "Applied automatically")
+            Picker("Mouse mode", selection: $mouseCaptureProfile) {
+                ForEach(MouseCaptureProfile.allCases) { profile in
+                    Text(profile.title).tag(profile)
+                }
+            }
+            Text(mouseCaptureProfile.summary)
+                .foregroundStyle(.secondary)
+            Button("Reapply Fix & Relaunch Steam") { launch() }
+                .disabled(engine == nil || isWorking)
+            Text("If the pointer becomes trapped again, press ⌥↩ to toggle window mode, then ⌘Tab back to Mac Wine Launcher and try another mouse mode here.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var cyberpunkFixDetails: some View {
+        if Launcher.isCyberpunkInstalled(in: bottle) {
+            if Launcher.isDontPanicInstalled(in: bottle) { Divider() }
+            LabeledContent("Game", value: "Cyberpunk 2077")
+            LabeledContent(
+                "Known bug",
+                value: "REDlauncher can fail to create an OpenGL context"
+            )
+            LabeledContent(
+                "Fix status",
+                value: "Qt fallback enabled; launcher bypass available"
+            )
+            Button("Launch Cyberpunk 2077 (Skip REDlauncher)") { launchCyberpunk() }
+                .disabled(engine == nil || isWorking)
+            Text("Starts the Steam copy directly with its supported launcher-skip argument. The game still uses the selected DirectX renderer and display profile.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private func install() {
         guard engine != nil else { return }
         steamProgress = nil
@@ -589,6 +618,36 @@ private struct BottleDetail: View {
                 )
                 operationStatus =
                     "Steam’s interface is running with \(resolved.title) and \(displayProfile.title)."
+            } catch {
+                operationStatus = nil
+                report(error.localizedDescription)
+            }
+            runtimeProgress = nil
+            isWorking = false
+        }
+    }
+
+    private func launchCyberpunk() {
+        guard engine != nil else { return }
+        steamProgress = nil
+        operationStatus = "Starting Cyberpunk 2077 without REDlauncher…"
+        isWorking = true
+        Task {
+            do {
+                let readyEngine = try await prepareEngine()
+                try Launcher.launchCyberpunk(
+                    in: bottle,
+                    using: readyEngine,
+                    graphicsBackend: graphicsBackend,
+                    displayProfile: displayProfile
+                )
+                operationStatus = "Steam accepted the direct game launch. Waiting for Cyberpunk 2077…"
+                try await Launcher.waitForCyberpunk(
+                    in: bottle,
+                    using: readyEngine
+                )
+                operationStatus =
+                    "Cyberpunk 2077 is running with \(resolvedGraphicsBackend.title)."
             } catch {
                 operationStatus = nil
                 report(error.localizedDescription)
@@ -776,6 +835,13 @@ private struct BottleDetail: View {
         guard let engine else { return [.automatic, .wineD3D] }
         let available = Launcher.availableGraphicsBackends(for: engine)
         return GraphicsBackend.allCases.filter(available.contains)
+    }
+
+    private var knownGameFixCount: Int {
+        var count = 0
+        if Launcher.isDontPanicInstalled(in: bottle) { count += 1 }
+        if Launcher.isCyberpunkInstalled(in: bottle) { count += 1 }
+        return count
     }
 
     private var resolvedGraphicsBackend: GraphicsBackend {
