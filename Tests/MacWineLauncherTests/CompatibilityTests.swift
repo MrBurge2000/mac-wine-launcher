@@ -258,6 +258,69 @@ import Testing
     ) == ["-applaunch", "1091500", "--launcher-skip"])
 }
 
+@Test func cyberpunkLauncherSkipIsAddedToAnExistingSteamGameEntry() {
+    let original = """
+    "UserLocalConfigStore"
+    {
+        "Software"
+        {
+            "Valve"
+            {
+                "Steam"
+                {
+                    "apps"
+                    {
+                        "1091500"
+                        {
+                            "LastPlayed"        "123"
+                            "LaunchOptions"     "--modded"
+                        }
+                    }
+                }
+            }
+        }
+    }
+    """
+
+    let patched = Launcher.patchSteamLaunchOption(
+        in: original,
+        appID: "1091500",
+        requiredOption: "--launcher-skip"
+    )
+
+    #expect(patched.contains("\"LaunchOptions\"\t\t\"--modded --launcher-skip\""))
+    #expect(Launcher.patchSteamLaunchOption(
+        in: patched,
+        appID: "1091500",
+        requiredOption: "--launcher-skip"
+    ) == patched)
+}
+
+@Test func cyberpunkLauncherSkipCreatesTheSteamGameEntryWhenMissing() {
+    let original = """
+    "UserLocalConfigStore"
+    {
+        "apps"
+        {
+            "480"
+            {
+                "LastPlayed"        "123"
+            }
+        }
+    }
+    """
+
+    let patched = Launcher.patchSteamLaunchOption(
+        in: original,
+        appID: "1091500",
+        requiredOption: "--launcher-skip"
+    )
+
+    #expect(patched.contains("\"1091500\""))
+    #expect(patched.contains("\"LaunchOptions\"\t\t\"--launcher-skip\""))
+    #expect(patched.contains("\"480\""))
+}
+
 @Test func cyberpunkDetectionRequiresTheGameExecutable() throws {
     let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }

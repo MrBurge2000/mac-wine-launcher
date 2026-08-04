@@ -557,7 +557,7 @@ private struct BottleDetail: View {
             )
             LabeledContent(
                 "Fix status",
-                value: "Qt fallback enabled; launcher bypass available"
+                value: "Applied automatically; manual launch available"
             )
             Button("Launch Cyberpunk 2077 (Skip REDlauncher)") { launchCyberpunk() }
                 .disabled(engine == nil || isWorking)

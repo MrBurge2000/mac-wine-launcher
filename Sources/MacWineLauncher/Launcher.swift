@@ -20,7 +20,8 @@ enum Launcher {
     static let dontPanicExecutableName = "Don't Panic! It is Just Turbulence.exe"
     static let cyberpunkSteamAppID = "1091500"
     static let cyberpunkExecutableName = "Cyberpunk2077.exe"
-    static let cyberpunkLaunchArguments = ["--launcher-skip"]
+    static let cyberpunkLauncherSkipOption = "--launcher-skip"
+    static let cyberpunkLaunchArguments = [cyberpunkLauncherSkipOption]
     // Retained for advanced/legacy Wine installs. The managed Sikarugir runtime
     // carries its own Steam-specific CEF fixes and must launch without these flags.
     static let steamCompatibilityArguments = [
@@ -493,6 +494,178 @@ enum Launcher {
             in: steamDirectory,
             fileManager: fileManager
         )
+        if isCyberpunkInstalled(in: bottle, fileManager: fileManager) {
+            try ensureCyberpunkLauncherSkip(in: bottle, fileManager: fileManager)
+        }
+    }
+
+    static func ensureCyberpunkLauncherSkip(
+        in bottle: Bottle,
+        fileManager: FileManager = .default
+    ) throws {
+        let userdata = steamExecutableURL(in: bottle)
+            .deletingLastPathComponent()
+            .appending(path: "userdata", directoryHint: .isDirectory)
+        guard let users = try? fileManager.contentsOfDirectory(
+            at: userdata,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        for user in users {
+            let localConfig = user.appending(
+                path: "config/localconfig.vdf",
+                directoryHint: .notDirectory
+            )
+            guard let contents = try? String(contentsOf: localConfig, encoding: .utf8) else {
+                continue
+            }
+            let patched = patchSteamLaunchOption(
+                in: contents,
+                appID: cyberpunkSteamAppID,
+                requiredOption: cyberpunkLauncherSkipOption
+            )
+            guard patched != contents else { continue }
+            try patched.write(to: localConfig, atomically: true, encoding: .utf8)
+        }
+    }
+
+    static func patchSteamLaunchOption(
+        in contents: String,
+        appID: String,
+        requiredOption: String
+    ) -> String {
+        let lineSeparator = contents.contains("\r\n") ? "\r\n" : "\n"
+        var lines = contents.components(separatedBy: lineSeparator)
+        guard let appsKey = lines.firstIndex(where: {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "\"apps\""
+        }),
+        let appsOpen = nextVDFOpeningBrace(in: lines, after: appsKey),
+        let appsClose = closingVDFBrace(in: lines, openingAt: appsOpen) else {
+            return contents
+        }
+
+        var depth = 1
+        var appKey: Int?
+        if appsOpen + 1 < appsClose {
+            for index in (appsOpen + 1)..<appsClose {
+                if depth == 1,
+                   lines[index].trimmingCharacters(in: .whitespacesAndNewlines) == "\"\(appID)\"" {
+                    appKey = index
+                    break
+                }
+                depth += vdfBraceDelta(in: lines[index])
+            }
+        }
+
+        if let appKey,
+           let appOpen = nextVDFOpeningBrace(in: lines, after: appKey),
+           let appClose = closingVDFBrace(in: lines, openingAt: appOpen) {
+            if appOpen + 1 < appClose {
+                for index in (appOpen + 1)..<appClose {
+                    guard let current = vdfQuotedValue(
+                        forKey: "LaunchOptions",
+                        in: lines[index]
+                    ) else { continue }
+                    let options = current.split(whereSeparator: \.isWhitespace).map(String.init)
+                    guard !options.contains(requiredOption) else { return contents }
+                    let merged = current.isEmpty
+                        ? requiredOption
+                        : current + " " + requiredOption
+                    let indentation = leadingWhitespace(in: lines[index])
+                    lines[index] = indentation + "\"LaunchOptions\"\t\t\"\(merged)\""
+                    return lines.joined(separator: lineSeparator)
+                }
+            }
+
+            let indentation = leadingWhitespace(in: lines[appClose]) + "\t"
+            lines.insert(
+                indentation + "\"LaunchOptions\"\t\t\"\(requiredOption)\"",
+                at: appClose
+            )
+            return lines.joined(separator: lineSeparator)
+        }
+
+        let childIndentation = leadingWhitespace(in: lines[appsClose]) + "\t"
+        let valueIndentation = childIndentation + "\t"
+        lines.insert(contentsOf: [
+            childIndentation + "\"\(appID)\"",
+            childIndentation + "{",
+            valueIndentation + "\"LaunchOptions\"\t\t\"\(requiredOption)\"",
+            childIndentation + "}"
+        ], at: appsClose)
+        return lines.joined(separator: lineSeparator)
+    }
+
+    private static func nextVDFOpeningBrace(in lines: [String], after index: Int) -> Int? {
+        guard index + 1 < lines.count else { return nil }
+        for candidate in (index + 1)..<lines.count {
+            let trimmed = lines[candidate].trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { continue }
+            return trimmed == "{" ? candidate : nil
+        }
+        return nil
+    }
+
+    private static func closingVDFBrace(in lines: [String], openingAt index: Int) -> Int? {
+        var depth = 0
+        for candidate in index..<lines.count {
+            depth += vdfBraceDelta(in: lines[candidate])
+            if depth == 0 { return candidate }
+        }
+        return nil
+    }
+
+    private static func vdfBraceDelta(in line: String) -> Int {
+        var delta = 0
+        var insideQuote = false
+        var escaped = false
+        for character in line {
+            if escaped {
+                escaped = false
+                continue
+            }
+            if insideQuote, character == "\\" {
+                escaped = true
+            } else if character == "\"" {
+                insideQuote.toggle()
+            } else if !insideQuote, character == "{" {
+                delta += 1
+            } else if !insideQuote, character == "}" {
+                delta -= 1
+            }
+        }
+        return delta
+    }
+
+    private static func vdfQuotedValue(forKey key: String, in line: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefix = "\"\(key)\""
+        guard trimmed.lowercased().hasPrefix(prefix.lowercased()) else { return nil }
+        var remainder = String(trimmed.dropFirst(prefix.count))
+            .trimmingCharacters(in: .whitespaces)
+        guard remainder.first == "\"" else { return nil }
+        remainder.removeFirst()
+        var value = ""
+        var escaped = false
+        for character in remainder {
+            if escaped {
+                value.append("\\")
+                value.append(character)
+                escaped = false
+            } else if character == "\\" {
+                escaped = true
+            } else if character == "\"" {
+                return value
+            } else {
+                value.append(character)
+            }
+        }
+        return nil
+    }
+
+    private static func leadingWhitespace(in line: String) -> String {
+        String(line.prefix(while: \.isWhitespace))
     }
 
     static func removeSteamUpdateInhibitor(

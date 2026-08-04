@@ -4,6 +4,13 @@ All notable changes to Mac Wine Launcher are recorded here.
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-08-04
+
+- Made the Cyberpunk 2077 REDlauncher bypass automatic for the normal Steam Play
+  button while preserving any launch options already configured by the player.
+- Kept the dedicated manual launch button as a fallback and made the Steam settings
+  repair repeatable without adding duplicate options.
+
 ## [0.6.2] - 2026-08-04
 
 - Added an automatic software-rendering fallback for Qt launchers that cannot create
@@ -27,6 +34,7 @@ All notable changes to Mac Wine Launcher are recorded here.
 - Added managed Wine bottles, Windows application launching, Windows Steam installation,
   DirectX renderer selection, Retina profiles, known-game fixes, and battery-safe shutdown.
 
-[Unreleased]: https://github.com/MrBurge2000/mac-wine-launcher/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/MrBurge2000/mac-wine-launcher/compare/v0.6.3...HEAD
+[0.6.3]: https://github.com/MrBurge2000/mac-wine-launcher/releases/tag/v0.6.3
 [0.6.2]: https://github.com/MrBurge2000/mac-wine-launcher/releases/tag/v0.6.2
 [0.6.1]: https://github.com/MrBurge2000/mac-wine-launcher/releases/tag/v0.6.1
