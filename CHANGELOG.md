@@ -4,6 +4,13 @@ All notable changes to Mac Wine Launcher are recorded here.
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-09-10
+
+- Automatically disables Marvel Rivals' false Unreal Engine AMD/D3D12 driver
+  warning inside Wine without changing the selected renderer or other games.
+- Preserves existing per-user Unreal Engine settings and reapplies the scoped
+  compatibility setting safely whenever Steam starts.
+
 ## [0.6.3] - 2026-08-04
 
 - Made the Cyberpunk 2077 REDlauncher bypass automatic for the normal Steam Play
@@ -34,7 +41,8 @@ All notable changes to Mac Wine Launcher are recorded here.
 - Added managed Wine bottles, Windows application launching, Windows Steam installation,
   DirectX renderer selection, Retina profiles, known-game fixes, and battery-safe shutdown.
 
-[Unreleased]: https://github.com/MrBurge2000/mac-wine-launcher/compare/v0.6.3...HEAD
+[Unreleased]: https://github.com/MrBurge2000/mac-wine-launcher/compare/v0.6.4...HEAD
+[0.6.4]: https://github.com/MrBurge2000/mac-wine-launcher/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/MrBurge2000/mac-wine-launcher/releases/tag/v0.6.3
 [0.6.2]: https://github.com/MrBurge2000/mac-wine-launcher/releases/tag/v0.6.2
 [0.6.1]: https://github.com/MrBurge2000/mac-wine-launcher/releases/tag/v0.6.1

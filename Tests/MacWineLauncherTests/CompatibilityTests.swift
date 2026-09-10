@@ -339,6 +339,67 @@ import Testing
     #expect(Launcher.isCyberpunkInstalled(in: bottle))
 }
 
+@Test func marvelRivalsDriverWarningFixPreservesExistingEngineSettings() {
+    let original = """
+    [/Script/Engine.RendererSettings]
+    r.VSync=1
+
+    [ConsoleVariables]
+    r.WarnOfBadDrivers=1
+    r.TextureStreaming=1
+    """
+
+    let patched = Launcher.patchINISetting(
+        in: original,
+        section: "ConsoleVariables",
+        key: Launcher.marvelRivalsBadDriverWarningKey,
+        value: "0"
+    )
+
+    #expect(patched.contains("r.WarnOfBadDrivers=0"))
+    #expect(patched.contains("r.VSync=1"))
+    #expect(patched.contains("r.TextureStreaming=1"))
+    #expect(Launcher.patchINISetting(
+        in: patched,
+        section: "ConsoleVariables",
+        key: Launcher.marvelRivalsBadDriverWarningKey,
+        value: "0"
+    ) == patched)
+}
+
+@Test func marvelRivalsDriverWarningFixCreatesPerUserConfigurations() throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let executable = root.appending(
+        path: "drive_c/Program Files (x86)/Steam/steamapps/common/MarvelRivals/MarvelGame/Marvel/Binaries/Win64/Marvel-Win64-Shipping.exe"
+    )
+    try FileManager.default.createDirectory(
+        at: executable.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    try Data("game".utf8).write(to: executable)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: executable.path
+    )
+    try FileManager.default.createDirectory(
+        at: root.appending(path: "drive_c/users/player"),
+        withIntermediateDirectories: true
+    )
+    let bottle = Bottle(name: "Test", path: root.path, engine: .managedWine)
+
+    #expect(Launcher.isMarvelRivalsInstalled(in: bottle))
+    try Launcher.ensureMarvelRivalsDriverWarningDisabled(in: bottle)
+
+    for platform in ["Windows", "WindowsClient"] {
+        let configuration = root.appending(
+            path: "drive_c/users/player/AppData/Local/Marvel/Saved/Config/\(platform)/Engine.ini"
+        )
+        let contents = try String(contentsOf: configuration, encoding: .utf8)
+        #expect(contents == "[ConsoleVariables]\nr.WarnOfBadDrivers=0\n")
+    }
+}
+
 @Test func bottleShutdownForceStopsAProcessThatIgnoresTermination() throws {
     let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }

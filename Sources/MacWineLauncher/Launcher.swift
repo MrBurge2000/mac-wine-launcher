@@ -22,6 +22,8 @@ enum Launcher {
     static let cyberpunkExecutableName = "Cyberpunk2077.exe"
     static let cyberpunkLauncherSkipOption = "--launcher-skip"
     static let cyberpunkLaunchArguments = [cyberpunkLauncherSkipOption]
+    static let marvelRivalsExecutableName = "Marvel-Win64-Shipping.exe"
+    static let marvelRivalsBadDriverWarningKey = "r.WarnOfBadDrivers"
     // Retained for advanced/legacy Wine installs. The managed Sikarugir runtime
     // carries its own Steam-specific CEF fixes and must launch without these flags.
     static let steamCompatibilityArguments = [
@@ -497,6 +499,99 @@ enum Launcher {
         if isCyberpunkInstalled(in: bottle, fileManager: fileManager) {
             try ensureCyberpunkLauncherSkip(in: bottle, fileManager: fileManager)
         }
+        if isMarvelRivalsInstalled(in: bottle, fileManager: fileManager) {
+            try ensureMarvelRivalsDriverWarningDisabled(
+                in: bottle,
+                fileManager: fileManager
+            )
+        }
+    }
+
+    static func ensureMarvelRivalsDriverWarningDisabled(
+        in bottle: Bottle,
+        fileManager: FileManager = .default
+    ) throws {
+        let usersDirectory = URL(fileURLWithPath: bottle.path, isDirectory: true)
+            .appending(path: "drive_c/users", directoryHint: .isDirectory)
+        guard let users = try? fileManager.contentsOfDirectory(
+            at: usersDirectory,
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        for user in users {
+            guard user.lastPathComponent.caseInsensitiveCompare("Public") != .orderedSame,
+                  let values = try? user.resourceValues(
+                    forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
+                  ),
+                  values.isDirectory == true,
+                  values.isSymbolicLink != true else {
+                continue
+            }
+            for platform in ["Windows", "WindowsClient"] {
+                let configuration = user.appending(
+                    path: "AppData/Local/Marvel/Saved/Config/\(platform)/Engine.ini",
+                    directoryHint: .notDirectory
+                )
+                let contents = (try? String(contentsOf: configuration, encoding: .utf8)) ?? ""
+                let patched = patchINISetting(
+                    in: contents,
+                    section: "ConsoleVariables",
+                    key: marvelRivalsBadDriverWarningKey,
+                    value: "0"
+                )
+                guard patched != contents else { continue }
+                try fileManager.createDirectory(
+                    at: configuration.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try patched.write(to: configuration, atomically: true, encoding: .utf8)
+            }
+        }
+    }
+
+    static func patchINISetting(
+        in contents: String,
+        section: String,
+        key: String,
+        value: String
+    ) -> String {
+        let lineSeparator = contents.contains("\r\n") ? "\r\n" : "\n"
+        var lines = contents.components(separatedBy: lineSeparator)
+        if contents.isEmpty {
+            lines = []
+        } else if lines.last == "" {
+            lines.removeLast()
+        }
+
+        let expectedSection = "[\(section)]".lowercased()
+        if let sectionIndex = lines.firstIndex(where: {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == expectedSection
+        }) {
+            let sectionEnd = lines[(sectionIndex + 1)...].firstIndex(where: {
+                let trimmed = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.hasPrefix("[") && trimmed.hasSuffix("]")
+            }) ?? lines.endIndex
+            let expectedKey = key.lowercased()
+            if let settingIndex = lines[(sectionIndex + 1)..<sectionEnd].firstIndex(where: {
+                guard let separator = $0.firstIndex(of: "=") else { return false }
+                return $0[..<separator]
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased() == expectedKey
+            }) {
+                let indentation = leadingWhitespace(in: lines[settingIndex])
+                lines[settingIndex] = "\(indentation)\(key)=\(value)"
+            } else {
+                lines.insert("\(key)=\(value)", at: sectionEnd)
+            }
+        } else {
+            if !lines.isEmpty, !lines.last!.isEmpty {
+                lines.append("")
+            }
+            lines.append("[\(section)]")
+            lines.append("\(key)=\(value)")
+        }
+        return lines.joined(separator: lineSeparator) + lineSeparator
     }
 
     static func ensureCyberpunkLauncherSkip(
@@ -875,6 +970,22 @@ enum Launcher {
         fileManager: FileManager = .default
     ) -> Bool {
         fileManager.isExecutableFile(atPath: cyberpunkExecutableURL(in: bottle).path)
+    }
+
+    static func marvelRivalsExecutableURL(in bottle: Bottle) -> URL {
+        URL(fileURLWithPath: bottle.path, isDirectory: true)
+            .appending(
+                path: "drive_c/Program Files (x86)/Steam/steamapps/common/MarvelRivals/MarvelGame/Marvel/Binaries/Win64",
+                directoryHint: .isDirectory
+            )
+            .appending(path: marvelRivalsExecutableName)
+    }
+
+    static func isMarvelRivalsInstalled(
+        in bottle: Bottle,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        fileManager.isExecutableFile(atPath: marvelRivalsExecutableURL(in: bottle).path)
     }
 
     static func steamGameArguments(
