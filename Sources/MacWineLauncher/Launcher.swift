@@ -1165,7 +1165,9 @@ enum Launcher {
         environment["WINEPREFIX"] = bottle.path
         environment["WINEDEBUG"] = "-all"
 
-        guard isSikarugir(engine) else { return environment }
+        guard isSikarugir(engine) else {
+            return optimizedGamingEnvironment(baseEnvironment: environment)
+        }
 
         let bin = engine.executableURL.deletingLastPathComponent()
         let bundle = bin.deletingLastPathComponent()
@@ -1203,6 +1205,21 @@ enum Launcher {
             environment["ROSETTA_ADVERTISE_AVX"] = "1"
         }
         #endif
+        return optimizedGamingEnvironment(baseEnvironment: environment)
+    }
+
+    /// Disables diagnostic output that can add disk I/O or CPU work while a
+    /// game is running. These settings do not alter rendering quality,
+    /// renderer selection, shader caches, or game compatibility features.
+    static func optimizedGamingEnvironment(
+        baseEnvironment: [String: String]
+    ) -> [String: String] {
+        var environment = baseEnvironment
+        environment["DXVK_LOG_LEVEL"] = "none"
+        environment["DXVK_LOG_PATH"] = "none"
+        environment["DXMT_LOG_LEVEL"] = "none"
+        environment["VKD3D_DEBUG"] = "none"
+        environment["VKD3D_SHADER_DEBUG"] = "none"
         return environment
     }
 
@@ -1364,7 +1381,6 @@ enum Launcher {
         environment.removeValue(forKey: "CX_D3DMETALPATH")
         environment.removeValue(forKey: "CX_APPLEGPT_LIBD3DSHARED_PATH")
         environment.removeValue(forKey: "CX_APPLEGPTK_LIBD3DSHARED_PATH")
-        environment.removeValue(forKey: "DXMT_LOG_LEVEL")
 
         let backend = resolvedGraphicsBackend(requested, for: engine)
         guard let folder = backend.rendererFolderName else { return }
@@ -1380,8 +1396,6 @@ enum Launcher {
             environment["CX_D3DMETALPATH"] = external.path
             environment["CX_APPLEGPT_LIBD3DSHARED_PATH"] = sharedLibrary
             environment["CX_APPLEGPTK_LIBD3DSHARED_PATH"] = sharedLibrary
-        } else if backend == .dxmt {
-            environment["DXMT_LOG_LEVEL"] = "none"
         }
     }
 

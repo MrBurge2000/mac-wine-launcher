@@ -561,6 +561,46 @@ private func peStub(machine: UInt16, marker: UInt8 = 0) -> Data {
     #expect(environment["CX_APPLEGPTK_LIBD3DSHARED_PATH"] == shared.path)
 }
 
+@Test func gamingEnvironmentDisablesRendererDiagnosticsWithoutChangingUserSettings() {
+    let environment = Launcher.optimizedGamingEnvironment(
+        baseEnvironment: [
+            "KEEP_ME": "yes",
+            "DXVK_CONFIG": "dxgi.maxFrameLatency = 1",
+            "VKD3D_CONFIG": "force_static_cbv"
+        ]
+    )
+
+    #expect(environment["DXVK_LOG_LEVEL"] == "none")
+    #expect(environment["DXVK_LOG_PATH"] == "none")
+    #expect(environment["DXMT_LOG_LEVEL"] == "none")
+    #expect(environment["VKD3D_DEBUG"] == "none")
+    #expect(environment["VKD3D_SHADER_DEBUG"] == "none")
+    #expect(environment["DXVK_CONFIG"] == "dxgi.maxFrameLatency = 1")
+    #expect(environment["VKD3D_CONFIG"] == "force_static_cbv")
+    #expect(environment["KEEP_ME"] == "yes")
+}
+
+@Test func everyWineEngineReceivesNoOverheadGamingEnvironment() {
+    let engine = Engine(
+        kind: .wine,
+        executableURL: URL(fileURLWithPath: "/usr/local/bin/wine")
+    )
+    let bottle = Bottle(name: "Test", path: "/Bottle", engine: .wine)
+    let environment = Launcher.configuredEnvironment(
+        engine: engine,
+        bottle: bottle,
+        baseEnvironment: [:]
+    )
+
+    #expect(environment["WINEPREFIX"] == "/Bottle")
+    #expect(environment["WINEDEBUG"] == "-all")
+    #expect(environment["DXVK_LOG_LEVEL"] == "none")
+    #expect(environment["DXVK_LOG_PATH"] == "none")
+    #expect(environment["DXMT_LOG_LEVEL"] == "none")
+    #expect(environment["VKD3D_DEBUG"] == "none")
+    #expect(environment["VKD3D_SHADER_DEBUG"] == "none")
+}
+
 @Test func retinaDisplayProfileWritesWineRegistrySettings() {
     let commands = Launcher.displayRegistryArguments(for: .retinaRecommended)
     #expect(commands.count == 2)

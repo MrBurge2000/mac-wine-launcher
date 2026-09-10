@@ -4,6 +4,16 @@ All notable changes to Mac Wine Launcher are recorded here.
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-09-11
+
+- Opted the launcher into macOS Game Mode so supported systems can reduce
+  background activity and prioritize smoother, more consistent gameplay.
+- Disabled DXVK, DXMT, and vkd3d-proton diagnostic logging during normal game
+  sessions to avoid unnecessary CPU and disk work.
+- Kept renderer selection, image quality, overlays, and persistent shader caches
+  unchanged so the performance pass does not trade away visual quality or
+  compatibility.
+
 ## [0.6.4] - 2026-09-10
 
 - Automatically disables Marvel Rivals' false Unreal Engine AMD/D3D12 driver
@@ -41,7 +51,8 @@ All notable changes to Mac Wine Launcher are recorded here.
 - Added managed Wine bottles, Windows application launching, Windows Steam installation,
   DirectX renderer selection, Retina profiles, known-game fixes, and battery-safe shutdown.
 
-[Unreleased]: https://github.com/MrBurge2000/mac-wine-launcher/compare/v0.6.4...HEAD
+[Unreleased]: https://github.com/MrBurge2000/mac-wine-launcher/compare/v0.6.5...HEAD
+[0.6.5]: https://github.com/MrBurge2000/mac-wine-launcher/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/MrBurge2000/mac-wine-launcher/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/MrBurge2000/mac-wine-launcher/releases/tag/v0.6.3
 [0.6.2]: https://github.com/MrBurge2000/mac-wine-launcher/releases/tag/v0.6.2
