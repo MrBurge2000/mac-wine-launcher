@@ -258,6 +258,90 @@ import Testing
     ) == ["-applaunch", "1091500", "--launcher-skip"])
 }
 
+@Test func baldursGate3UsesItsOfficialLauncherSkipOption() {
+    #expect(Launcher.baldursGate3SteamAppID == "1086940")
+    #expect(Launcher.baldursGate3LauncherSkipOption == "--skip-launcher")
+}
+
+@Test func baldursGate3DetectionRequiresTheGameExecutable() throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let bottle = Bottle(name: "Test", path: root.path, engine: .managedWine)
+    let executable = Launcher.baldursGate3ExecutableURL(in: bottle)
+    try FileManager.default.createDirectory(
+        at: executable.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+
+    #expect(!Launcher.isBaldursGate3Installed(in: bottle))
+    try Data("game".utf8).write(to: executable)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: executable.path
+    )
+    #expect(Launcher.isBaldursGate3Installed(in: bottle))
+}
+
+@Test func baldursGate3LauncherFixPreservesExistingSteamOptions() throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let bottle = Bottle(name: "Test", path: root.path, engine: .managedWine)
+    let executable = Launcher.baldursGate3ExecutableURL(in: bottle)
+    try FileManager.default.createDirectory(
+        at: executable.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    try Data("game".utf8).write(to: executable)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: executable.path
+    )
+    let config = Launcher.steamExecutableURL(in: bottle)
+        .deletingLastPathComponent()
+        .appending(path: "userdata/123/config/localconfig.vdf")
+    try FileManager.default.createDirectory(
+        at: config.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    let original = """
+    "UserLocalConfigStore"
+    {
+        "Software"
+        {
+            "Valve"
+            {
+                "Steam"
+                {
+                    "apps"
+                    {
+                        "1086940"
+                        {
+                            "LaunchOptions"     "--modded"
+                        }
+                    }
+                }
+            }
+        }
+    }
+    """
+    try original.write(to: config, atomically: true, encoding: .utf8)
+
+    try Launcher.ensureSteamLaunchOption(
+        in: bottle,
+        appID: Launcher.baldursGate3SteamAppID,
+        requiredOption: Launcher.baldursGate3LauncherSkipOption
+    )
+
+    let patched = try String(contentsOf: config, encoding: .utf8)
+    #expect(patched.contains("--modded --skip-launcher"))
+    try Launcher.ensureSteamLaunchOption(
+        in: bottle,
+        appID: Launcher.baldursGate3SteamAppID,
+        requiredOption: Launcher.baldursGate3LauncherSkipOption
+    )
+    #expect(try String(contentsOf: config, encoding: .utf8) == patched)
+}
+
 @Test func cyberpunkLauncherSkipIsAddedToAnExistingSteamGameEntry() {
     let original = """
     "UserLocalConfigStore"

@@ -517,6 +517,8 @@ private struct BottleDetail: View {
                 ) {
                     dontPanicFixDetails
                     cyberpunkFixDetails
+                    baldursGate3FixDetails
+                    marvelRivalsFixDetails
                 }
             }
         }
@@ -562,6 +564,44 @@ private struct BottleDetail: View {
             Button("Launch Cyberpunk 2077 (Skip REDlauncher)") { launchCyberpunk() }
                 .disabled(engine == nil || isWorking)
             Text("Starts the Steam copy directly with its supported launcher-skip argument. The game still uses the selected DirectX renderer and display profile.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var baldursGate3FixDetails: some View {
+        if Launcher.isBaldursGate3Installed(in: bottle) {
+            if Launcher.isDontPanicInstalled(in: bottle) ||
+                Launcher.isCyberpunkInstalled(in: bottle) { Divider() }
+            LabeledContent("Game", value: "Baldur’s Gate 3")
+            LabeledContent(
+                "Known bug",
+                value: "Larian Launcher can open black or crash under Wine"
+            )
+            LabeledContent(
+                "Fix status",
+                value: "Official launcher-skip option applied automatically"
+            )
+            Text("Steam starts the game directly while preserving existing launch options and the selected DirectX renderer.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var marvelRivalsFixDetails: some View {
+        if Launcher.isMarvelRivalsInstalled(in: bottle) {
+            if Launcher.isDontPanicInstalled(in: bottle) ||
+                Launcher.isCyberpunkInstalled(in: bottle) ||
+                Launcher.isBaldursGate3Installed(in: bottle) { Divider() }
+            LabeledContent("Game", value: "Marvel Rivals")
+            LabeledContent(
+                "Known bug",
+                value: "Wine can trigger a false AMD D3D12 driver warning"
+            )
+            LabeledContent("Fix status", value: "Applied automatically")
+            Text("Only the false Unreal Engine warning is disabled; the renderer, graphics settings, and game files are unchanged.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -841,6 +881,8 @@ private struct BottleDetail: View {
         var count = 0
         if Launcher.isDontPanicInstalled(in: bottle) { count += 1 }
         if Launcher.isCyberpunkInstalled(in: bottle) { count += 1 }
+        if Launcher.isBaldursGate3Installed(in: bottle) { count += 1 }
+        if Launcher.isMarvelRivalsInstalled(in: bottle) { count += 1 }
         return count
     }
 

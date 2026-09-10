@@ -4,6 +4,16 @@ All notable changes to Mac Wine Launcher are recorded here.
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-09-11
+
+- Automatically applies Baldur’s Gate 3’s official `--skip-launcher` option
+  when the game is installed, avoiding common Larian Launcher black-window and
+  startup failures under Wine while preserving existing launch options.
+- Expanded Known Game Bugs & Fixes so every active automatic fix, including
+  Marvel Rivals, is counted and explained in one troubleshooting section.
+- Kept destructive anti-cheat bypasses, executable renames, global virtual
+  desktops, and forced low-quality renderer settings out of the automatic pass.
+
 ## [0.6.5] - 2026-09-11
 
 - Opted the launcher into macOS Game Mode so supported systems can reduce
@@ -51,7 +61,8 @@ All notable changes to Mac Wine Launcher are recorded here.
 - Added managed Wine bottles, Windows application launching, Windows Steam installation,
   DirectX renderer selection, Retina profiles, known-game fixes, and battery-safe shutdown.
 
-[Unreleased]: https://github.com/MrBurge2000/mac-wine-launcher/compare/v0.6.5...HEAD
+[Unreleased]: https://github.com/MrBurge2000/mac-wine-launcher/compare/v0.6.6...HEAD
+[0.6.6]: https://github.com/MrBurge2000/mac-wine-launcher/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/MrBurge2000/mac-wine-launcher/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/MrBurge2000/mac-wine-launcher/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/MrBurge2000/mac-wine-launcher/releases/tag/v0.6.3

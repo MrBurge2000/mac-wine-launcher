@@ -131,6 +131,9 @@ Known game fixes are scoped to the affected executable and applied silently. Whe
 installed title needs a game-specific input or graphics workaround, Mac Wine Launcher enables
 it automatically without changing other games. A collapsed **Known Game Bugs & Fixes**
 section exposes the affected title and manual fallbacks only for troubleshooting.
+Current rules cover Cyberpunk 2077 and Baldur’s Gate 3 launcher failures, Marvel Rivals’
+false Wine GPU-driver warning, and Don’t Panic’s pointer-capture bug. Existing Steam
+launch options and unrelated game settings are preserved.
 
 No translation layer can guarantee every Windows game. Renderer-specific bugs,
 unsupported launchers, Windows driver requirements, DRM, and developer-disabled or

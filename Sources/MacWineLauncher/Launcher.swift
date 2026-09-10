@@ -22,6 +22,9 @@ enum Launcher {
     static let cyberpunkExecutableName = "Cyberpunk2077.exe"
     static let cyberpunkLauncherSkipOption = "--launcher-skip"
     static let cyberpunkLaunchArguments = [cyberpunkLauncherSkipOption]
+    static let baldursGate3SteamAppID = "1086940"
+    static let baldursGate3ExecutableName = "bg3_dx11.exe"
+    static let baldursGate3LauncherSkipOption = "--skip-launcher"
     static let marvelRivalsExecutableName = "Marvel-Win64-Shipping.exe"
     static let marvelRivalsBadDriverWarningKey = "r.WarnOfBadDrivers"
     // Retained for advanced/legacy Wine installs. The managed Sikarugir runtime
@@ -499,6 +502,14 @@ enum Launcher {
         if isCyberpunkInstalled(in: bottle, fileManager: fileManager) {
             try ensureCyberpunkLauncherSkip(in: bottle, fileManager: fileManager)
         }
+        if isBaldursGate3Installed(in: bottle, fileManager: fileManager) {
+            try ensureSteamLaunchOption(
+                in: bottle,
+                appID: baldursGate3SteamAppID,
+                requiredOption: baldursGate3LauncherSkipOption,
+                fileManager: fileManager
+            )
+        }
         if isMarvelRivalsInstalled(in: bottle, fileManager: fileManager) {
             try ensureMarvelRivalsDriverWarningDisabled(
                 in: bottle,
@@ -598,6 +609,20 @@ enum Launcher {
         in bottle: Bottle,
         fileManager: FileManager = .default
     ) throws {
+        try ensureSteamLaunchOption(
+            in: bottle,
+            appID: cyberpunkSteamAppID,
+            requiredOption: cyberpunkLauncherSkipOption,
+            fileManager: fileManager
+        )
+    }
+
+    static func ensureSteamLaunchOption(
+        in bottle: Bottle,
+        appID: String,
+        requiredOption: String,
+        fileManager: FileManager = .default
+    ) throws {
         let userdata = steamExecutableURL(in: bottle)
             .deletingLastPathComponent()
             .appending(path: "userdata", directoryHint: .isDirectory)
@@ -617,8 +642,8 @@ enum Launcher {
             }
             let patched = patchSteamLaunchOption(
                 in: contents,
-                appID: cyberpunkSteamAppID,
-                requiredOption: cyberpunkLauncherSkipOption
+                appID: appID,
+                requiredOption: requiredOption
             )
             guard patched != contents else { continue }
             try patched.write(to: localConfig, atomically: true, encoding: .utf8)
@@ -970,6 +995,22 @@ enum Launcher {
         fileManager: FileManager = .default
     ) -> Bool {
         fileManager.isExecutableFile(atPath: cyberpunkExecutableURL(in: bottle).path)
+    }
+
+    static func baldursGate3ExecutableURL(in bottle: Bottle) -> URL {
+        URL(fileURLWithPath: bottle.path, isDirectory: true)
+            .appending(
+                path: "drive_c/Program Files (x86)/Steam/steamapps/common/Baldurs Gate 3/bin",
+                directoryHint: .isDirectory
+            )
+            .appending(path: baldursGate3ExecutableName)
+    }
+
+    static func isBaldursGate3Installed(
+        in bottle: Bottle,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        fileManager.isExecutableFile(atPath: baldursGate3ExecutableURL(in: bottle).path)
     }
 
     static func marvelRivalsExecutableURL(in bottle: Bottle) -> URL {
