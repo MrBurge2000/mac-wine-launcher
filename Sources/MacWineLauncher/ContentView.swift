@@ -190,7 +190,7 @@ private struct BottleDetail: View {
     @State private var steamProgress: Launcher.SteamInstallProgress?
     @State private var operationStatus: String?
     @State private var graphicsBackend: GraphicsBackend = .automatic
-    @State private var displayProfile: DisplayProfile = .retinaRecommended
+    @State private var displayProfile: DisplayProfile = .standard
     @State private var mouseCaptureProfile: MouseCaptureProfile = .menuSafe
     @State private var windowsArguments = ""
     @State private var recentWindowsApplications: [RecentWindowsApplication] = []
@@ -454,6 +454,11 @@ private struct BottleDetail: View {
                let backend = GraphicsBackend(rawValue: saved),
                availableGraphicsBackends.contains(backend) {
                 graphicsBackend = backend
+            }
+            let displayMigrationKey = "screenResolutionDefault.\(bottle.id.uuidString)"
+            if !UserDefaults.standard.bool(forKey: displayMigrationKey) {
+                UserDefaults.standard.set(DisplayProfile.standard.rawValue, forKey: displayPreferenceKey)
+                UserDefaults.standard.set(true, forKey: displayMigrationKey)
             }
             if let saved = UserDefaults.standard.string(forKey: displayPreferenceKey),
                let profile = DisplayProfile(rawValue: saved) {

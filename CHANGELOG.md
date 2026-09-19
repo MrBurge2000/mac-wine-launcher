@@ -4,6 +4,14 @@ All notable changes to Mac Wine Launcher are recorded here.
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-09-19
+
+- Default to the Mac's logical screen resolution instead of doubling resolution
+  through Retina mode. Applies to Steam, installers, and directly launched apps.
+- Migrate existing bottle display preferences once to Match screen. Retina remains
+  available as an explicit choice. Games with saved resolutions may still need
+  their own display settings adjusted.
+
 ## [0.6.6] - 2026-09-11
 
 - Automatically applies Baldur’s Gate 3’s official `--skip-launcher` option

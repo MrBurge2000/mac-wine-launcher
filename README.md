@@ -122,8 +122,8 @@ detected automatically and Qt WebEngine uses a Wine-safe software rendering fall
 without changing the graphics mode used by games or other Windows apps.
 
 Per-bottle display profiles control Wine's macOS Retina mode and Windows DPI. The
-recommended Retina profile renders Steam at 2× resolution with 200% Windows scaling,
-keeping the interface readable while exposing higher display resolutions to games.
+recommended Match screen profile uses the Mac’s logical display resolution without
+doubling it. Existing bottles migrate to this default once; Retina is an explicit opt-in.
 Each game still controls its own fullscreen resolution; native Retina is sharpest,
 while a lower in-game resolution usually delivers better frame rate.
 

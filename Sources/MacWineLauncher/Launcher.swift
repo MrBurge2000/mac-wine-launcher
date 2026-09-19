@@ -89,7 +89,7 @@ enum Launcher {
         in bottle: Bottle,
         using engine: Engine,
         graphicsBackend: GraphicsBackend = .automatic,
-        displayProfile: DisplayProfile? = nil,
+        displayProfile: DisplayProfile? = .standard,
         mouseCaptureProfile: MouseCaptureProfile = .menuSafe
     ) throws {
         if engine.kind == .crossover {
@@ -226,7 +226,7 @@ enum Launcher {
         in bottle: Bottle,
         using engine: Engine,
         graphicsBackend: GraphicsBackend = .automatic,
-        displayProfile: DisplayProfile? = nil,
+        displayProfile: DisplayProfile? = .standard,
         mouseCaptureProfile: MouseCaptureProfile = .menuSafe
     ) throws {
         guard engine.kind != .crossover, engine.kind != .whisky else {
@@ -278,7 +278,7 @@ enum Launcher {
         in bottle: Bottle,
         using engine: Engine,
         graphicsBackend: GraphicsBackend = .automatic,
-        displayProfile: DisplayProfile? = nil
+        displayProfile: DisplayProfile? = .standard
     ) throws {
         guard engine.kind != .crossover else {
             throw LaunchError.guiEngine(
@@ -1040,7 +1040,7 @@ enum Launcher {
         in bottle: Bottle,
         using engine: Engine,
         graphicsBackend: GraphicsBackend = .automatic,
-        displayProfile: DisplayProfile? = nil
+        displayProfile: DisplayProfile? = .standard
     ) throws {
         guard isSteamInstalled(in: bottle) else {
             throw LaunchError.steamMissing
