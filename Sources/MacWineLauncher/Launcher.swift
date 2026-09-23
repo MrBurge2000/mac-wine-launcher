@@ -516,12 +516,28 @@ enum Launcher {
                 fileManager: fileManager
             )
         }
+        let wukongExecutable = steamExecutableURL(in: bottle)
+            .deletingLastPathComponent()
+            .appending(path: "steamapps/common/BlackMythWukong/b1/Binaries/Win64/b1-Win64-Shipping.exe")
+        if fileManager.fileExists(atPath: wukongExecutable.path) {
+            try ensureUnrealDriverWarningDisabled(in: bottle, gameDirectory: "b1", fileManager: fileManager)
+        }
     }
 
     static func ensureMarvelRivalsDriverWarningDisabled(
         in bottle: Bottle,
         fileManager: FileManager = .default
     ) throws {
+        try ensureUnrealDriverWarningDisabled(in: bottle, gameDirectory: "Marvel", fileManager: fileManager)
+    }
+
+    // Only explicitly supported games: never suppress unrelated driver dialogs globally.
+    static func ensureUnrealDriverWarningDisabled(
+        in bottle: Bottle,
+        gameDirectory: String,
+        fileManager: FileManager = .default
+    ) throws {
+        guard ["Marvel", "b1"].contains(gameDirectory) else { return }
         let usersDirectory = URL(fileURLWithPath: bottle.path, isDirectory: true)
             .appending(path: "drive_c/users", directoryHint: .isDirectory)
         guard let users = try? fileManager.contentsOfDirectory(
@@ -541,7 +557,7 @@ enum Launcher {
             }
             for platform in ["Windows", "WindowsClient"] {
                 let configuration = user.appending(
-                    path: "AppData/Local/Marvel/Saved/Config/\(platform)/Engine.ini",
+                    path: "AppData/Local/\(gameDirectory)/Saved/Config/\(platform)/Engine.ini",
                     directoryHint: .notDirectory
                 )
                 let contents = (try? String(contentsOf: configuration, encoding: .utf8)) ?? ""

@@ -484,6 +484,23 @@ import Testing
     }
 }
 
+@Test func wukongDriverWarningFixIsScopedAndIdempotent() throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let config = root.appending(path: "drive_c/users/player/AppData/Local/b1/Saved/Config/Windows/Engine.ini")
+    try FileManager.default.createDirectory(at: config.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try "[Core.System]\nPaths=keep\n".write(to: config, atomically: true, encoding: .utf8)
+    let bottle = Bottle(name: "Test", path: root.path, engine: .managedWine)
+    try Launcher.ensureUnrealDriverWarningDisabled(in: bottle, gameDirectory: "b1")
+    let once = try String(contentsOf: config, encoding: .utf8)
+    #expect(once.contains("Paths=keep"))
+    #expect(once.contains("r.WarnOfBadDrivers=0"))
+    try Launcher.ensureUnrealDriverWarningDisabled(in: bottle, gameDirectory: "b1")
+    #expect(try String(contentsOf: config, encoding: .utf8) == once)
+    try Launcher.ensureUnrealDriverWarningDisabled(in: bottle, gameDirectory: "OtherGame")
+    #expect(!FileManager.default.fileExists(atPath: root.appending(path: "drive_c/users/player/AppData/Local/OtherGame").path))
+}
+
 @Test func bottleShutdownForceStopsAProcessThatIgnoresTermination() throws {
     let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
