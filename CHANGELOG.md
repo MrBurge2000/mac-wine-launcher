@@ -4,6 +4,14 @@ All notable changes to Mac Wine Launcher are recorded here.
 
 ## [Unreleased]
 
+## [0.6.8] - 2026-09-23
+
+- Apply the targeted Unreal driver-warning setting to detected Black Myth: Wukong
+  installations as well as Marvel Rivals when Steam starts.
+- Apply the setting through SystemSettings in addition to ConsoleVariables,
+  preserving unrelated game settings. This suppresses a warning, not graphics errors.
+- Covered by 52 passing tests; warning suppression still needs in-game confirmation.
+
 ## [0.6.7] - 2026-09-19
 
 - Default to the Mac's logical screen resolution instead of doubling resolution
