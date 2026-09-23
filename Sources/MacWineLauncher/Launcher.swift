@@ -561,9 +561,15 @@ enum Launcher {
                     directoryHint: .notDirectory
                 )
                 let contents = (try? String(contentsOf: configuration, encoding: .utf8)) ?? ""
-                let patched = patchINISetting(
+                let consolePatched = patchINISetting(
                     in: contents,
                     section: "ConsoleVariables",
+                    key: marvelRivalsBadDriverWarningKey,
+                    value: "0"
+                )
+                let patched = patchINISetting(
+                    in: consolePatched,
+                    section: "SystemSettings",
                     key: marvelRivalsBadDriverWarningKey,
                     value: "0"
                 )

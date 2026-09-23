@@ -480,7 +480,8 @@ import Testing
             path: "drive_c/users/player/AppData/Local/Marvel/Saved/Config/\(platform)/Engine.ini"
         )
         let contents = try String(contentsOf: configuration, encoding: .utf8)
-        #expect(contents == "[ConsoleVariables]\nr.WarnOfBadDrivers=0\n")
+        #expect(contents.contains("[ConsoleVariables]\nr.WarnOfBadDrivers=0"))
+        #expect(contents.contains("[SystemSettings]\nr.WarnOfBadDrivers=0"))
     }
 }
 
@@ -495,6 +496,7 @@ import Testing
     let once = try String(contentsOf: config, encoding: .utf8)
     #expect(once.contains("Paths=keep"))
     #expect(once.contains("r.WarnOfBadDrivers=0"))
+    #expect(once.contains("[SystemSettings]\nr.WarnOfBadDrivers=0"))
     try Launcher.ensureUnrealDriverWarningDisabled(in: bottle, gameDirectory: "b1")
     #expect(try String(contentsOf: config, encoding: .utf8) == once)
     try Launcher.ensureUnrealDriverWarningDisabled(in: bottle, gameDirectory: "OtherGame")
