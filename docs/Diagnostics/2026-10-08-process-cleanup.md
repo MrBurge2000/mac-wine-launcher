@@ -95,9 +95,37 @@ on this Mac. The user was asked to launch Wukong with their usual launch option
 and leave it at the main menu, so gameplay and a normal in-game exit can be
 validated with their cooperation rather than substituting a forced termination.
 
+## First post-restart Wukong launch
+
+The user reported the game launched. Wukong's bootstrap PID 8897 and game PID
+8899 started at 02:11:40; EpicWebHelper PID 8940 started at 02:11:53. The game log
+at 02:11:50 reported 6,361.55 MB physical memory free, compared with 3,515.98 MB
+in the preceding 00:02:24 launch. This is improved launch-time availability, not
+proof of frame-time improvement.
+
+At 02:12:16, global graphics memory in use was 3.14 GB, and AGX exposed the new
+game client's 19 command queues and EpicWebHelper's four queues. The ledger
+recorded both current PID/birth-time identities, so they can be followed through
+exit without depending on open files remaining readable.
+
+Steam main helper CPU was 1.2%, 1.2% and 1.4% in five-second intervals at
+02:12:49–02:13:00, and 1.1%, 1.2% and 1.1% at 02:14:09–02:14:19. Wineserver
+was about 4–6% CPU in these intervals, rather than the reported prolonged 62%.
+The game process's `top` memory footprint was about 9,700–9,800 MiB. At 02:14:42,
+global graphics memory in use was 3.41 GB, wired memory 5.66 GB, compressor
+10.80 GB, and swap usage 2,637 MiB. Memory compression/swap is still substantial
+with this game and the other open apps. It must not be conflated with the old
+post-exit graphics-driver stall.
+
+Wukong rewrote configuration files during launch; their post-launch hashes differ
+from the pre-launch values above. No manual game-configuration or save-file edits
+were performed during this validation. The running game's reported menu state,
+gameplay smoothness, and normal-exit results are still pending user feedback;
+there is no automated frame-time measurement or visible Wine-game UI here.
+
 ## Remaining validation
 
-Wukong launch/exit cycles and a gameplay stutter comparison are **not completed**.
+Wukong has launched, but exit cycles and a gameplay stutter comparison are **not completed**.
 The existing kernel-exit/GPU-client state persisted through the initial
 investigation; restart subsequently cleared it as measured above.
 The changes do not guarantee that the Wine/Metal driver will never stall again.
