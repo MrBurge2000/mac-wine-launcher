@@ -174,21 +174,64 @@ EpicWebHelper PID 12021 at 02:30:12. The log reported 9,787.30 MB physical memor
 free at 02:30:09, back within the earlier healthy 8–9 GB range. At 02:30:28,
 global graphics memory in use was 3.79 GB and the two new clients had 19 and
 four queues. Both PID/birth-time identities were recorded in the ledger.
-The normal-exit repeat check is awaiting the user's in-game Quit action.
+Main Steam helper CPU was 1.1%, 1.4% and 1.7% in the 02:31:21–02:31:32
+intervals while the second game session remained open.
 
-## Remaining validation
+## Second normal exit and final bottle shutdown
 
-The first full gameplay test, normal game exit, launcher-quit cleanup, and
-cross-bottle isolation have passed. The second normal game exit and final
-Stop Steam & Wine check are not yet completed.
-The existing kernel-exit/GPU-client state persisted through the initial
-investigation; restart subsequently cleared it as measured above.
-The changes do not guarantee that the Wine/Metal driver will never stall again.
+The user reported the second game closed. Its log recorded `Closing by request`
+at 02:34:49 and closed at 02:34:52. At 02:35:04, the bootstrap, game and
+EpicWebHelper PIDs were absent, along with both game-session AGX clients.
+Global graphics memory in use was 0.92 GB, wired memory 3.16 GB, compressor
+3.48 GB, and swap usage 3,483 MiB. Main Steam helper CPU after this exit was
+1.6%, 2.1% and 2.1%; wineserver was 0.7–0.8%, in the 02:35:37–02:35:47
+intervals.
 
-Next, collect snapshots after the second normal game exit and after Stop Steam
-& Wine. No objective frame-time comparison or multi-day soak test has been
-performed. Do not attribute all global GPU memory to one process, or promise
-that the underlying graphics driver cannot stall again.
+Stop Steam & Wine was then confirmed through the native launcher's UI. It
+displayed "Steam and every Wine process in this bottle are stopped." At
+02:36:28, only the native launcher remained in the diagnostic process list:
+no Wine, Steam or game process, and no Wine AGX client. Global graphics memory
+in use was 0.97 GB, wired memory 3.16 GB, compressor 1.32 GB, and the free-page
+pool was 11.24 GB. Swap remained 3,467 MiB. The installed-bottle inspector
+independently reported both `Verified bottle PIDs: []` and
+`Unowned exiting Wine PIDs: []`.
+
+The native launcher itself used 0.3%, 0.3% and 0.4% CPU in the five-second
+intervals at 02:36:34–02:36:44, with about 56 MiB memory footprint. At 02:37:28,
+the delayed follow-up still showed no Wine/Steam/game processes or Wine AGX
+clients, and the persisted ownership ledger contained zero records. No helpers
+had restarted in that observed interval.
+
+These pre/post-shutdown hashes matched for the second cycle:
+
+- GameUserSettings.ini: `2597d9fe52c2b6f8326a7b51a09c679e9782d225ffd7667192dcb75886227e7d`
+- Engine.ini: `0bddc1addc83204861bdf924a7969a5f6ee0b3310b4863ea7bbbd995586e5a1f`
+- SaveGames aggregate: `50202775a83a5e12c8bf17eb0d714a8ce3fe462d66068a05ae8e9a52935bdb8c`
+
+## Outcome and limits
+
+Two real Wukong launch/normal-exit cycles passed, including a full gameplay
+test reported smooth by the user at full fan speed. The second was a shorter
+repeat cycle, not a second instrumented gameplay comparison. Both normal
+exits removed the game's processes and AGX clients. Launcher-quit cleanup and
+the explicit bottle-stop control also passed, as did the real two-prefix
+isolation check and the regular 57-test suite. Neither shutdown modified the
+observed save files or game configurations. The installed app's signature
+verified and its executable contains both arm64 and x86_64.
+
+The original kernel-exit/GPU-client stall cleared only after the Mac restart.
+These results do not prove that the underlying Wine/Metal driver cannot stall
+again. No objective FPS/frame-time comparison, all-game validation or multi-day
+soak test was performed. The improvement is consistent with removing the old
+stalled session and avoiding Steam interface redraw work, but the full-fan
+gameplay test does not isolate the effect of cooling from these software changes.
+Global graphics-memory values must not be attributed entirely to one process.
+If a driver-exiting Wine process survives the new cleanup, the launcher reports
+it and advises saving work and restarting the Mac.
+
+Local 0.6.9 build 28 remains installed, with minimized Steam startup and
+cleanup-on-quit enabled. Windows Steam is stopped at the end of the validation.
+No merge, push or public release was performed during this investigation.
 
 `python3 scripts/runtime-diagnostics.py` prints a read-only JSON snapshot. For
 interval CPU, use `top -l 4 -s 5 -pid PID -stats pid,cpu,time,mem,threads -n 1`.
