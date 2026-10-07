@@ -119,22 +119,76 @@ post-exit graphics-driver stall.
 
 Wukong rewrote configuration files during launch; their post-launch hashes differ
 from the pre-launch values above. No manual game-configuration or save-file edits
-were performed during this validation. The running game's reported menu state,
-gameplay smoothness, and normal-exit results are still pending user feedback;
-there is no automated frame-time measurement or visible Wine-game UI here.
+were performed during this validation. There is no automated frame-time
+measurement or visible Wine-game UI here.
+
+## First game exit and launcher quit
+
+The user completed a full gameplay test and reported that Wukong ran very well
+at full fan speed. This is a positive user-observed result, not an instrumented
+FPS claim; no fan controls were changed during this investigation.
+
+The game log recorded `Closing by request` at 02:24:35 and closed at 02:24:45.
+By the 02:26:19 snapshot, PIDs 8897, 8899 and 8940 were absent, as were both of
+their AGX clients. Global graphics memory in use was 0.81 GB, wired memory 3.04
+GB, and compressor 1.39 GB. About 11.30 GB was in the free-page pool. Swap usage
+was 5,513 MiB; retained swap after exit is not proof that a process or GPU client
+is still alive. The observed stuck-process condition did not recur in this exit.
+
+Steam remained open for the separate exit measurement. Its main helper used
+7.0%, 8.1% and 8.9% CPU in the 02:27:18–02:27:28 intervals, higher than the
+minimized gaming intervals but still below the previous roughly 75% baseline.
+This variation is retained in the results rather than claiming Steam always
+runs at 1–2%.
+
+The installed app was then quit using Command-Q with its cleanup-on-quit toggle
+enabled. At 02:28:07, no launcher, Wine, Steam or game processes remained and no
+Wine AGX clients remained. Global graphics memory in use was 1.11 GB; it is
+system-wide and varies with the other open apps. No cleanup-failure alert was
+required in this successful quit.
+
+Immediately before and after that shutdown, the following hashes matched:
+
+- GameUserSettings.ini: `18afc35d4d6c507e3f92bcd3384fb65319490959c3aefd43e7d156494ddd8a49`
+- Engine.ini: `0bddc1addc83204861bdf924a7969a5f6ee0b3310b4863ea7bbbd995586e5a1f`
+- Sorted aggregate of files in the game's SaveGames directory:
+  `50202775a83a5e12c8bf17eb0d714a8ce3fe462d66068a05ae8e9a52935bdb8c`
+
+The regular 57-test suite passed again. The opt-in real Wine isolation test
+also passed again after reboot: stopping temporary bottle A removed its eight
+observed PIDs while bottle B's five observed PIDs and command remained alive.
+Temporary bottle B was then cleaned up; the final snapshot contained no Wine
+processes. The tests do not modify the real Steam bottle's saves/settings.
+
+## Second launch (repeat check)
+
+The launcher and minimized Steam were reopened with the same bottle, renderer
+and display profile. The first-exit configuration hashes still matched after
+Steam startup. Wukong was requested through the launcher's Windows-app control
+by running the existing Steam executable with `-applaunch 2358720`; temporary
+launch arguments were cleared from the field afterward. No game executable,
+graphics settings or runtime binary was modified for this test.
+
+The bootstrap PID 11950 started at 02:30:00, game PID 11952 at 02:30:01, and
+EpicWebHelper PID 12021 at 02:30:12. The log reported 9,787.30 MB physical memory
+free at 02:30:09, back within the earlier healthy 8–9 GB range. At 02:30:28,
+global graphics memory in use was 3.79 GB and the two new clients had 19 and
+four queues. Both PID/birth-time identities were recorded in the ledger.
+The normal-exit repeat check is awaiting the user's in-game Quit action.
 
 ## Remaining validation
 
-Wukong has launched, but exit cycles and a gameplay stutter comparison are **not completed**.
+The first full gameplay test, normal game exit, launcher-quit cleanup, and
+cross-bottle isolation have passed. The second normal game exit and final
+Stop Steam & Wine check are not yet completed.
 The existing kernel-exit/GPU-client state persisted through the initial
 investigation; restart subsequently cleared it as measured above.
 The changes do not guarantee that the Wine/Metal driver will never stall again.
 
-The before-Steam and minimized-Steam baselines are now collected. Next, collect
-snapshots at the Wukong menu, after normal game exit, and after Stop Steam & Wine. Repeat two game
-cycles using the same save, settings, and gameplay scene. Compare remaining PIDs,
-AGX clients, global graphics memory, wired/compressed memory, swap and game frame
-times. Do not attribute all global GPU memory to one process.
+Next, collect snapshots after the second normal game exit and after Stop Steam
+& Wine. No objective frame-time comparison or multi-day soak test has been
+performed. Do not attribute all global GPU memory to one process, or promise
+that the underlying graphics driver cannot stall again.
 
 `python3 scripts/runtime-diagnostics.py` prints a read-only JSON snapshot. For
 interval CPU, use `top -l 4 -s 5 -pid PID -stats pid,cpu,time,mem,threads -n 1`.
