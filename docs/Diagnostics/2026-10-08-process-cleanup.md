@@ -67,15 +67,43 @@ shutdown:
 
 No saves were edited or deleted.
 
+## Post-restart baseline
+
+The user restarted the Mac; `kern.boottime` confirms 8 October 2026 at 02:03:33
+local time. At 02:07:47, before Windows Steam was launched, no Wine/Steam/game
+process or Wine AGX client remained. Global graphics memory in use was
+278,233,088 bytes (0.28 GB), wired memory was 2,634,317,824 bytes (2.63 GB), and
+swap usage was zero. The previous PID 21629 and its 19 queues were gone. This
+confirms that restart cleared the observed stalled state; it does not establish
+that the launcher changes prevent a future graphics-driver stall.
+
+The installed app is 0.6.9, build 28. Windows Steam was launched through its
+Launch Steam button with Start Steam minimized enabled. Steam PID 8140 had
+`-silent`; main webhelper PID 8168 retained `--disable-gpu --in-process-gpu`.
+After startup settled, three five-second CPU interval samples at 02:09:31,
+02:09:36 and 02:09:41 were 1.9%, 2.1% and 2.2%. At 02:09:35, global graphics
+memory in use was 0.74 GB and swap remained zero. These samples validate fresh
+minimized startup, not just manual minimization of an existing session.
+
+The two principal Wukong configuration hashes still matched the values above
+before this new game test. The process ledger had refreshed with current-boot
+identities and retained permissions of 0600. No saves or game settings were
+edited by the investigation.
+
+Computer Use exposes the native launcher but not the Wine-hosted game windows
+on this Mac. The user was asked to launch Wukong with their usual launch option
+and leave it at the main menu, so gameplay and a normal in-game exit can be
+validated with their cooperation rather than substituting a forced termination.
+
 ## Remaining validation
 
 Wukong launch/exit cycles and a gameplay stutter comparison are **not completed**.
-The existing kernel-exit/GPU-client state persisted throughout this investigation,
-so a clean graphics-memory baseline is unavailable until the Mac restarts.
+The existing kernel-exit/GPU-client state persisted through the initial
+investigation; restart subsequently cleared it as measured above.
 The changes do not guarantee that the Wine/Metal driver will never stall again.
 
-After restarting, collect a snapshot before Steam, with Steam minimized, at the
-Wukong menu, after normal game exit, and after Stop Steam & Wine. Repeat two game
+The before-Steam and minimized-Steam baselines are now collected. Next, collect
+snapshots at the Wukong menu, after normal game exit, and after Stop Steam & Wine. Repeat two game
 cycles using the same save, settings, and gameplay scene. Compare remaining PIDs,
 AGX clients, global graphics memory, wired/compressed memory, swap and game frame
 times. Do not attribute all global GPU memory to one process.
