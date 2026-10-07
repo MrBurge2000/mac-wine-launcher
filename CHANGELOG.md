@@ -12,6 +12,10 @@ All notable changes to Mac Wine Launcher are recorded here.
 - Show cleanup failures before quitting and explain when a Mac restart is required.
 - Add an optional minimized Steam start to reduce background interface CPU work,
   keeping the Sikarugir graphics compatibility flags unchanged.
+- Validated two real Wukong launch/exit cycles, launcher-quit and bottle-stop
+  cleanup, and isolation between two running Wine bottles. Saves and settings
+  were preserved. A Wine process stuck in kernel/graphics-driver exit still
+  requires a Mac restart; no frame-rate or multi-day reliability guarantee is made.
 
 ## [0.6.8] - 2026-09-23
 
@@ -86,7 +90,9 @@ All notable changes to Mac Wine Launcher are recorded here.
 - Added managed Wine bottles, Windows application launching, Windows Steam installation,
   DirectX renderer selection, Retina profiles, known-game fixes, and battery-safe shutdown.
 
-[Unreleased]: https://github.com/MrBurge2000/mac-wine-launcher/compare/v0.6.6...HEAD
+[Unreleased]: https://github.com/MrBurge2000/mac-wine-launcher/compare/v0.6.9...HEAD
+[0.6.9]: https://github.com/MrBurge2000/mac-wine-launcher/compare/v0.6.8...v0.6.9
+[0.6.8]: https://github.com/MrBurge2000/mac-wine-launcher/releases/tag/v0.6.8
 [0.6.6]: https://github.com/MrBurge2000/mac-wine-launcher/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/MrBurge2000/mac-wine-launcher/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/MrBurge2000/mac-wine-launcher/compare/v0.6.3...v0.6.4
