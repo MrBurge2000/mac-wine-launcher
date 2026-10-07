@@ -4,6 +4,13 @@ All notable changes to Mac Wine Launcher are recorded here.
 
 ## [Unreleased]
 
+- Reorganize the native interface into Apps, Graphics & Display,
+  Troubleshooting and Bottle, preserving launch actions and saved preferences.
+- Make Steam launch the primary action, keep Windows apps and recent launches
+  together, and show installation/cleanup feedback across bottle sections.
+- Widen the bottle sidebar, simplify runtime/renderer labels, and keep paths
+  readable without crowding the launch screen. No new animation or polling.
+
 ## [0.6.9] - 2026-10-08
 
 - Request clean Windows app shutdown before stopping the bottle's Wine server.

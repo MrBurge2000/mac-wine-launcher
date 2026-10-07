@@ -84,5 +84,6 @@ struct MacWineLauncherApp: App {
                 }
         }
         .windowStyle(.titleBar)
+        .defaultSize(width: 1040, height: 720)
     }
 }

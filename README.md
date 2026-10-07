@@ -102,7 +102,7 @@ downloads are pinned to trusted SHA-256 checksums and stored under Mac Wine Laun
 Application Support directory. CrossOver and system Wine installations remain
 supported, while Whisky is detected only for existing users.
 
-The free runtime includes a switchable graphics stack. **AAA Auto** uses D3DMetal for
+The free runtime includes a switchable graphics stack. **Automatic** uses D3DMetal for
 64-bit DirectX 11 and 12 games on supported Apple Silicon Macs. DXMT and DXVK provide
 alternate DirectX 10/11 paths, D9VK accelerates many DirectX 9 games, and WineD3D is
 the conservative fallback. Mac Wine Launcher also enables Rosetta's AVX advertisement on
@@ -114,6 +114,12 @@ files directly through Wine. MSI packages use Windows Installer automatically, q
 launch arguments are parsed without a shell, each app starts from its own folder, and
 recent apps are remembered separately for each bottle. The selected graphics backend
 is shared with directly launched apps.
+
+The bottle interface keeps launch actions in **Apps**, renderer and resolution choices
+in **Graphics & Display**, repair tools and known-game fixes in **Troubleshooting**, and
+runtime updates, shutdown preferences, and uninstall controls in **Bottle**. Changing
+sections does not change the selected runtime or renderer. Existing bottles, saved
+preferences, and recent-app history are retained when updating the launcher.
 
 The managed runtime also installs WineHQ's pinned 32-bit and 64-bit ICU compatibility
 libraries into each bottle. This supplies the Windows Unicode system DLLs expected by

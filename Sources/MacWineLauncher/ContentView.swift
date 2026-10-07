@@ -13,44 +13,65 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(store.bottles, selection: $selection) { bottle in
-                Label(bottle.name, systemImage: "shippingbox")
-                    .tag(bottle.id)
+            List(selection: $selection) {
+                Section("Bottles") {
+                    ForEach(store.bottles) { bottle in
+                        HStack(spacing: 10) {
+                            Image(systemName: "shippingbox")
+                                .font(.title3)
+                                .foregroundStyle(.secondary)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(bottle.name).lineLimit(1)
+                                Text(LauncherInterface.engineName(bottle.engine))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            .padding(.vertical, 5)
+                        }
+                        .tag(bottle.id)
+                        .help(bottle.name)
+                    }
+                }
             }
-            .navigationTitle("Mac Wine Launcher")
-            .toolbar {
+            .listStyle(.sidebar)
+            .safeAreaInset(edge: .bottom) {
                 Button(action: { showingNewBottle = true }) {
                     Label("New Bottle", systemImage: "plus")
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .keyboardShortcut("n", modifiers: [.command, .shift])
                 .disabled(engines.isEmpty)
+                .padding(12)
             }
+            .navigationTitle("Mac Wine Launcher")
+            .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 300)
         } detail: {
             if engines.isEmpty {
                 ContentUnavailableView {
-                    Label("Free Runtime Needed", systemImage: "shippingbox.and.arrow.backward")
+                    Label("Install the Wine Runtime", systemImage: "shippingbox.and.arrow.backward")
                 } description: {
-                    Text("Install the free Sikarugir Wine gaming runtime. The two-part download is about 250 MB and usually takes 2–8 minutes.")
+                    Text("The free Sikarugir runtime runs Windows apps in your bottles. The download is about 250 MB and usually takes 2–8 minutes.")
                 } actions: {
                     if let runtimeProgress {
-                        VStack(spacing: 6) {
-                            if let fraction = runtimeProgress.fraction {
-                                ProgressView(value: fraction)
-                                    .frame(width: 280)
-                                Text("\(Int(fraction * 100))% · \(runtimeProgress.stage.rawValue)")
-                                    .monospacedDigit()
-                            } else {
-                                ProgressView()
-                            }
-                            Text(runtimeProgress.detail)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                        LauncherProgressView(
+                            title: runtimeProgress.stage.rawValue,
+                            fraction: runtimeProgress.fraction,
+                            detail: runtimeProgress.detail
+                        )
+                        .frame(width: 320)
                     }
                     Button(isInstallingRuntime ? "Installing…" : "Install Free Runtime") {
                         installFreeRuntime()
                     }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
                     .disabled(isInstallingRuntime)
                     Button("Refresh") { engines = EngineDiscovery.discover() }
+                        .buttonStyle(.link)
                 }
             } else if let bottle = selectedBottle {
                 BottleDetail(
@@ -65,11 +86,29 @@ struct ContentView: View {
                     },
                     report: { message = $0 }
                 )
+                .id(bottle.id)
             } else {
-                ContentUnavailableView("Choose a Bottle", systemImage: "gamecontroller")
+                ContentUnavailableView {
+                    Label(store.bottles.isEmpty ? "Create a Bottle" : "Choose a Bottle", systemImage: "shippingbox")
+                } description: {
+                    Text("A bottle keeps its Windows apps and settings in a separate environment.")
+                } actions: {
+                    Button("New Bottle…") { showingNewBottle = true }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                }
             }
         }
-        .frame(minWidth: 780, minHeight: 500)
+        .navigationSplitViewStyle(.balanced)
+        .frame(minWidth: 860, minHeight: 560)
+        .onAppear {
+            if selection == nil { selection = store.bottles.first?.id }
+        }
+        .onChange(of: store.bottles.map(\.id)) { _, ids in
+            if selection == nil || !ids.contains(where: { $0 == selection }) {
+                selection = ids.first
+            }
+        }
         .sheet(isPresented: $showingNewBottle) {
             NewBottleView(engines: engines) { name, kind in
                 do {
@@ -140,31 +179,39 @@ private struct NewBottleView: View {
     }
 
     var body: some View {
-        Form {
-            TextField("Bottle name", text: $name)
-            Picker("Engine", selection: $engine) {
-                ForEach(availableKinds) { kind in
-                    Text("\(kind.rawValue) — \(kind.status)").tag(kind)
+        VStack(alignment: .leading, spacing: 20) {
+            Label("New Bottle", systemImage: "shippingbox")
+                .font(.title2.weight(.semibold))
+            VStack(alignment: .leading, spacing: 16) {
+                TextField("Bottle name", text: $name)
+                    .textFieldStyle(.roundedBorder)
+                Picker("Runtime", selection: $engine) {
+                    ForEach(availableKinds) { kind in
+                        Text("\(LauncherInterface.engineName(kind)) — \(kind.status)").tag(kind)
+                    }
                 }
+                Text(engine == .crossover
+                     ? "CrossOver’s installer creates and configures the Windows environment."
+                     : "Each bottle has its own Windows apps and settings. The managed Wine runtime is free.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Text(engine == .crossover
-                 ? "Mac Wine Launcher will open CrossOver, whose installer creates and tunes the real Windows bottle."
-                 : "A bottle is an isolated Windows environment. Mac Wine Launcher Wine is free and managed by this app.")
-                .foregroundStyle(.secondary)
-        }
-        .padding()
-        .frame(width: 430)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
+            Divider()
+            HStack {
+                Spacer()
                 Button("Cancel") { dismiss() }
-            }
-            ToolbarItem(placement: .confirmationAction) {
+                    .keyboardShortcut(.cancelAction)
                 Button("Create") {
                     onCreate(name, engine)
                     dismiss()
                 }
+                .keyboardShortcut(.defaultAction)
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
+        .padding(24)
+        .frame(width: 460)
     }
 
     private var availableKinds: [EngineKind] {
@@ -195,269 +242,46 @@ private struct BottleDetail: View {
     @State private var mouseCaptureProfile: MouseCaptureProfile = .menuSafe
     @State private var windowsArguments = ""
     @State private var recentWindowsApplications: [RecentWindowsApplication] = []
+    @State private var page: BottlePage = .apps
     @AppStorage(MacWineLauncherAppDelegate.stopWineOnQuitKey)
     private var stopWineOnQuit = true
     @AppStorage("startSteamMinimized") private var startSteamMinimized = false
 
     var body: some View {
-        Form {
-            Section("Bottle") {
-                LabeledContent("Name", value: bottle.name)
-                LabeledContent("Engine", value: engine?.kind.rawValue ?? "Missing")
-                if engine?.kind == .crossover {
-                    Label("Commercial engine", systemImage: "checkmark.seal.fill")
-                        .foregroundStyle(.green)
-                } else if engine?.kind == .managedWine {
-                    if let engine, RuntimeInstaller.isCurrentRuntime(engine) {
-                        Label("Current free gaming runtime", systemImage: "checkmark.seal.fill")
-                            .foregroundStyle(.green)
-                    } else {
-                        Label("Upgrade installs automatically before Steam launches", systemImage: "arrow.down.circle.fill")
-                            .foregroundStyle(.orange)
-                    }
-                    Button("Update Gaming Runtime") { updateRuntime() }
-                        .disabled(isWorking)
-                }
-                LabeledContent("Location", value: bottle.path)
-            }
-
-            Section("Steam") {
-                if Launcher.isSteamInstalled(in: bottle) {
-                    Label("Windows Steam is installed", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                } else {
-                    Label("Windows Steam is not installed yet", systemImage: "arrow.down.circle")
-                        .foregroundStyle(.secondary)
-                }
-                HStack {
-                    Button(installButtonTitle) {
-                        install()
-                    }
-                    .disabled(engine == nil || isWorking)
-                    Button(engine?.kind == .crossover ? "Open CrossOver" : "Launch Steam") {
-                        launch()
-                    }
-                    .disabled(
-                        engine == nil ||
-                            isWorking ||
-                            (engine?.kind != .crossover && !Launcher.isSteamInstalled(in: bottle))
-                    )
-                    if engine?.kind == .managedWine || engine?.kind == .wine {
-                        Button("Stop Steam & Wine…") {
-                            showingStopConfirmation = true
-                        }
-                        .disabled(isWorking)
-                    }
-                }
-                if engine?.kind == .managedWine || engine?.kind == .wine {
-                    Toggle("Stop Steam and Wine when Mac Wine Launcher quits", isOn: $stopWineOnQuit)
+        // Keep status updates inside the split pane instead of growing the window's minimum size.
+        GeometryReader { viewport in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
                     if let cleanupWarning {
-                        Label(cleanupWarning, systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.orange)
-                    }
-                    Toggle("Start Steam minimized", isOn: $startSteamMinimized)
-                    Text("Keeps Steam in the background at launch to reduce interface CPU use while gaming. Open it from its tray icon when needed.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("Enabled by default so invisible Wine helpers cannot keep using CPU and battery after this app closes.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                if isWorking, steamProgress == nil, runtimeProgress == nil {
-                    ProgressView("Preparing…")
-                }
-                if let steamProgress {
-                    if let fraction = steamProgress.fraction {
-                        ProgressView(value: fraction)
-                        Text("\(Int(fraction * 100))% · \(steamProgress.stage.rawValue)")
-                            .font(.caption)
-                            .monospacedDigit()
-                    } else {
-                        ProgressView()
-                    }
-                    Text(steamProgress.detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                if let runtimeProgress {
-                    if let fraction = runtimeProgress.fraction {
-                        ProgressView(value: fraction)
-                    }
-                    Text("\(runtimeProgress.stage.rawValue): \(runtimeProgress.detail)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                if let operationStatus {
-                    Label(operationStatus, systemImage: "info.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                if engine?.kind == .managedWine || engine?.kind == .wine {
-                    Button("Fix Black Steam Window") { repairSteam() }
-                        .disabled(isWorking)
-                    Text("Closes Steam, clears its web-interface cache, and relaunches with software-rendered UI.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Section("Windows Apps") {
-                HStack {
-                    Button("Run Windows App or Installer…") {
-                        chooseWindowsApplication()
-                    }
-                    .disabled(
-                        engine == nil ||
-                            isWorking ||
-                            engine?.kind == .crossover ||
-                            engine?.kind == .whisky
-                    )
-                    Button("Open C: Drive") {
-                        NSWorkspace.shared.open(
-                            URL(fileURLWithPath: bottle.path, isDirectory: true)
-                                .appending(path: "drive_c", directoryHint: .isDirectory)
-                        )
-                    }
-                }
-                TextField(
-                    "Optional launch arguments, e.g. --safe-mode \"My File\"",
-                    text: $windowsArguments
-                )
-                Text("Choose a Windows .exe, .msi, .com, .bat, or .cmd file. It launches inside this bottle using \(resolvedGraphicsBackend.title); installers automatically run through Windows Installer.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if !recentWindowsApplications.isEmpty {
-                    LabeledContent("Recent") {
-                        Button("Clear") {
-                            recentWindowsApplications = []
-                            saveRecentWindowsApplications()
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                            Text(cleanupWarning)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        .buttonStyle(.link)
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
                     }
-                    ForEach(recentWindowsApplications.prefix(5)) { application in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(application.displayName)
-                                Text(application.path)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                            }
-                            Spacer()
-                            Button("Run") {
-                                runWindowsApplication(
-                                    at: URL(fileURLWithPath: application.path)
-                                )
-                            }
-                            .disabled(
-                                isWorking ||
-                                    !FileManager.default.fileExists(atPath: application.path)
-                            )
-                        }
+                    switch page {
+                    case .apps: appsPage
+                    case .graphics: graphicsPage
+                    case .troubleshooting: troubleshootingPage
+                    case .bottle: bottlePage
                     }
                 }
+                .frame(maxWidth: 820, alignment: .leading)
+                .padding(24)
+                .frame(maxWidth: .infinity)
             }
-
-            Section("AAA Game Graphics") {
-                Picker("Graphics mode", selection: $graphicsBackend) {
-                    ForEach(availableGraphicsBackends) { backend in
-                        Text("\(backend.title) — \(backend.coverage)")
-                            .tag(backend)
-                    }
-                }
-                LabeledContent(
-                    "Active renderer",
-                    value: resolvedGraphicsBackend.title
-                )
-                Text(graphicsBackend.explanation)
-                    .foregroundStyle(.secondary)
-                HStack {
-                    Text("Available renderer coverage:")
-                    Label("DX9", systemImage: "checkmark.circle.fill")
-                    Label("DX10", systemImage: "checkmark.circle.fill")
-                    Label("DX11", systemImage: "checkmark.circle.fill")
-                    Label("DX12", systemImage: "checkmark.circle.fill")
-                }
-                .font(.caption)
-                .foregroundStyle(.green)
-                Button("Apply Mode & Relaunch Steam") {
-                    launch()
-                }
-                .disabled(
-                    engine == nil ||
-                        isWorking ||
-                        (engine?.kind != .crossover && !Launcher.isSteamInstalled(in: bottle))
-                )
-                Text("Games launched by this Steam session inherit the selected DirectX renderer. If one game glitches, try DXMT, then DXVK, then WineD3D.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            .id(page)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                bottleHeader
             }
-
-            Section("Display & Resolution") {
-                Picker("Display quality", selection: $displayProfile) {
-                    ForEach(DisplayProfile.allCases) { profile in
-                        Text(profile.title).tag(profile)
-                    }
-                }
-                LabeledContent("Render mode", value: displayProfile.summary)
-                Text(displayProfile.explanation)
-                    .foregroundStyle(.secondary)
-                if let retinaResolutionSummary {
-                    LabeledContent("Current Mac render space", value: retinaResolutionSummary)
-                }
-                Button("Apply Display & Relaunch Steam") {
-                    launch()
-                }
-                .disabled(
-                    engine == nil ||
-                        isWorking ||
-                        (engine?.kind != .crossover && !Launcher.isSteamInstalled(in: bottle))
-                )
-                Text("After enabling Retina, open each game’s Display settings and choose a higher resolution. Native Retina is sharpest; lowering the in-game resolution improves frame rate.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            knownGameFixesSection
-
-            Section("Game Profile Helper") {
-                TextField("Game title", text: $title)
-                TextField("Notes, e.g. DX12 or Easy Anti-Cheat", text: $notes)
-                Button("Assess") {
-                    assessment = GameCompatibility.assess(title: title, notes: notes)
-                }
-                if let assessment {
-                    LabeledContent("Rating", value: assessment.rating.rawValue)
-                    Text(assessment.explanation).foregroundStyle(.secondary)
-                    if assessment.rating != .blocked {
-                        Button("Use \(assessment.recommendedBackend.title)") {
-                            graphicsBackend = assessment.recommendedBackend
-                        }
-                    }
-                }
-            }
-
-            Section("Compatibility limits") {
-                Text("Mac Wine Launcher now activates dedicated DirectX 9, 10, 11, and 12 renderers. It cannot bypass DRM or supply Windows kernel drivers; games that require unsupported kernel anti-cheat can still be blocked.")
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Uninstall") {
-                Button("Uninstall Bottle…", role: .destructive) {
-                    showingUninstallConfirmation = true
-                }
-                .disabled(isWorking || isUninstalling)
-                if isUninstalling {
-                    ProgressView("Uninstalling bottle…")
-                }
-                Text("Deletes this bottle, Windows Steam, and every game installed inside it. The Mac Wine Launcher app and shared Wine runtime stay installed.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            .frame(width: viewport.size.width, height: viewport.size.height, alignment: .top)
         }
-        .formStyle(.grouped)
+        .background(Color(nsColor: .windowBackgroundColor))
         .navigationTitle(bottle.name)
         .onAppear {
             if let saved = UserDefaults.standard.string(forKey: graphicsPreferenceKey),
@@ -487,14 +311,17 @@ private struct BottleDetail: View {
             }
         }
         .onChange(of: graphicsBackend) { _, newValue in
+            guard UserDefaults.standard.string(forKey: graphicsPreferenceKey) != newValue.rawValue else { return }
             UserDefaults.standard.set(newValue.rawValue, forKey: graphicsPreferenceKey)
-            operationStatus = "\(newValue.title) will be used the next time Steam launches."
+            operationStatus = "\(LauncherInterface.graphicsName(newValue)) will be used the next time Steam launches."
         }
         .onChange(of: displayProfile) { _, newValue in
+            guard UserDefaults.standard.string(forKey: displayPreferenceKey) != newValue.rawValue else { return }
             UserDefaults.standard.set(newValue.rawValue, forKey: displayPreferenceKey)
-            operationStatus = "\(newValue.title) will be used the next time Steam launches."
+            operationStatus = "\(LauncherInterface.displayName(newValue)) will be used the next time Steam launches."
         }
         .onChange(of: mouseCaptureProfile) { _, newValue in
+            guard UserDefaults.standard.string(forKey: inputPreferenceKey) != newValue.rawValue else { return }
             UserDefaults.standard.set(newValue.rawValue, forKey: inputPreferenceKey)
             operationStatus = "\(newValue.title) will be used for the known-game mouse fix the next time Steam launches."
         }
@@ -520,26 +347,368 @@ private struct BottleDetail: View {
         }
     }
 
+    private var bottleHeader: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(bottle.name)
+                            .font(.title2.weight(.semibold))
+                            .lineLimit(2)
+                            .textSelection(.enabled)
+                        Text("\(engine.map { LauncherInterface.engineName($0.kind) } ?? "Runtime missing") · \(resolvedGraphicsBackend.title)")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    Button(action: openCDrive) {
+                        Label("Open C: Drive", systemImage: "folder")
+                    }
+                    .help("Open this bottle’s Windows files in Finder")
+                }
+                Picker("Bottle section", selection: $page) {
+                    ForEach(BottlePage.allCases) { page in
+                        Text(page.rawValue).tag(page)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                if isWorking || isUninstalling || runtimeProgress != nil || operationStatus != nil {
+                    operationFeedback
+                }
+            }
+            .padding(24)
+            Divider()
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    @ViewBuilder
+    private var operationFeedback: some View {
+        if let runtimeProgress {
+            LauncherProgressView(
+                title: runtimeProgress.stage.rawValue,
+                fraction: runtimeProgress.fraction,
+                detail: runtimeProgress.detail
+            )
+        } else if let steamProgress, isWorking {
+            LauncherProgressView(
+                title: steamProgress.stage.rawValue,
+                fraction: steamProgress.fraction,
+                detail: steamProgress.detail
+            )
+        } else if isWorking || isUninstalling {
+            LauncherProgressView(
+                title: isUninstalling ? "Uninstalling bottle…" : operationStatus ?? "Preparing…",
+                fraction: nil,
+                detail: ""
+            )
+        } else if let operationStatus {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "info.circle")
+                Text(operationStatus)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private var appsPage: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            LauncherCard("Windows Steam", systemImage: "gamecontroller") {
+                HStack(alignment: .center) {
+                    Label(
+                        Launcher.isSteamInstalled(in: bottle) ? "Installed in this bottle" : "Not installed in this bottle",
+                        systemImage: Launcher.isSteamInstalled(in: bottle) ? "checkmark.circle" : "arrow.down.circle"
+                    )
+                    .foregroundStyle(.secondary)
+                    Spacer()
+                    if Launcher.isSteamInstalled(in: bottle) || engine?.kind == .crossover {
+                        Button(engine?.kind == .crossover ? "Open CrossOver" : "Launch Steam", action: launch)
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .disabled(!canLaunchSteam)
+                    } else {
+                        Button(installButtonTitle, action: install)
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .disabled(engine == nil || isWorking)
+                    }
+                }
+                Divider()
+                HStack(spacing: 12) {
+                    if Launcher.isSteamInstalled(in: bottle) || engine?.kind == .crossover {
+                        Button(installButtonTitle, action: install)
+                            .disabled(engine == nil || isWorking)
+                    }
+                    if supportsManagedActions {
+                        Button("Stop Steam & Wine…") { showingStopConfirmation = true }
+                            .disabled(isWorking)
+                    }
+                }
+            }
+            LauncherCard("Windows Apps", systemImage: "app") {
+                HStack(alignment: .top, spacing: 20) {
+                    Text("Run an app or installer in this bottle.")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Button("Run App or Installer…", action: chooseWindowsApplication)
+                        .help("Choose a Windows .exe, .msi, .com, .bat or .cmd file")
+                        .disabled(engine == nil || isWorking || engine?.kind == .crossover || engine?.kind == .whisky)
+                }
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Launch arguments").font(.subheadline)
+                    TextField("Optional, e.g. --safe-mode \"My File\"", text: $windowsArguments)
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityLabel("Launch arguments")
+                }
+                Text("Supports .exe, .msi, .com, .bat and .cmd. Windows Installer handles .msi files automatically. Renderer: \(resolvedGraphicsBackend.title).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !recentWindowsApplications.isEmpty {
+                    Divider()
+                    HStack {
+                        Text("Recent apps").font(.subheadline.weight(.medium))
+                        Spacer()
+                        Button("Clear") {
+                            recentWindowsApplications = []
+                            saveRecentWindowsApplications()
+                        }
+                        .buttonStyle(.link)
+                        .help("Clear the recent-app list without deleting files")
+                    }
+                    ForEach(recentWindowsApplications.prefix(5)) { application in
+                        HStack(spacing: 12) {
+                            Image(systemName: "app.dashed")
+                                .font(.title3)
+                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(application.displayName).lineLimit(1)
+                                Text(application.path)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            Spacer(minLength: 0)
+                            Button("Run") {
+                                runWindowsApplication(at: URL(fileURLWithPath: application.path))
+                            }
+                            .disabled(isWorking || !FileManager.default.fileExists(atPath: application.path))
+                            .accessibilityLabel("Run \(application.displayName)")
+                        }
+                        .help(application.path)
+                    }
+                }
+            }
+        }
+        .disabled(isUninstalling)
+    }
+
+    private var graphicsPage: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            LauncherCard("Graphics", systemImage: "cpu") {
+                Picker("Renderer", selection: $graphicsBackend) {
+                    ForEach(availableGraphicsBackends) { backend in
+                        Text("\(LauncherInterface.graphicsName(backend)) — \(backend.coverage)").tag(backend)
+                    }
+                }
+                LabeledContent("Active renderer", value: resolvedGraphicsBackend.title)
+                Text(LauncherInterface.graphicsDescription(graphicsBackend))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                LabeledContent("Available DirectX support") {
+                    Text(LauncherInterface.availableDirectXVersions(availableGraphicsBackends)
+                        .map { String($0) }.joined(separator: ", "))
+                        .foregroundStyle(.secondary)
+                }
+                Text("Games inherit the selected renderer when Steam launches. If a game has graphics problems, try DXMT, then DXVK, then WineD3D.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            LauncherCard("Display & Resolution", systemImage: "display") {
+                Picker("Display mode", selection: $displayProfile) {
+                    ForEach(DisplayProfile.allCases) { profile in
+                        Text(LauncherInterface.displayName(profile)).tag(profile)
+                    }
+                }
+                LabeledContent("Windows scaling", value: displayProfile.summary)
+                if let retinaResolutionSummary {
+                    LabeledContent("Mac render space", value: retinaResolutionSummary)
+                        .monospacedDigit()
+                }
+                Text(LauncherInterface.displayDescription(displayProfile))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("You can still choose resolution in each game’s Display settings. Lower in-game resolutions reduce GPU load.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Text("Changes take effect on the next Steam launch.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Apply & Relaunch Steam", action: launch)
+                    .disabled(!canLaunchSteam)
+            }
+        }
+        .disabled(isUninstalling)
+    }
+
+    private var troubleshootingPage: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            if supportsManagedActions {
+                LauncherCard("Steam Interface", systemImage: "wrench.and.screwdriver") {
+                    Text("If Steam opens as a black window, rebuild its web-interface cache and relaunch it with the compatibility settings.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Fix Black Steam Window", action: repairSteam)
+                        .disabled(isWorking)
+                    Text("Closes Steam and clears only its web-interface cache, not installed games or saves.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            knownGameFixesSection
+            LauncherCard("Compatibility Check", systemImage: "checkmark.shield") {
+                TextField("Game title", text: $title).textFieldStyle(.roundedBorder)
+                TextField("Notes, e.g. DX12 or Easy Anti-Cheat", text: $notes).textFieldStyle(.roundedBorder)
+                Button("Assess") { assessment = GameCompatibility.assess(title: title, notes: notes) }
+                if let assessment {
+                    Divider()
+                    LabeledContent("Rating", value: assessment.rating.rawValue)
+                    Text(LauncherInterface.compatibilityExplanation(assessment))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if assessment.rating != .blocked {
+                        Button("Use \(LauncherInterface.graphicsName(assessment.recommendedBackend))") {
+                            graphicsBackend = assessment.recommendedBackend
+                        }
+                    }
+                }
+            }
+            Text("Wine cannot bypass DRM or provide Windows kernel drivers. Games that require unsupported kernel anti-cheat may not run.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .disabled(isUninstalling)
+    }
+
+    private var bottlePage: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            LauncherCard("Bottle Details", systemImage: "shippingbox") {
+                LabeledContent("Name", value: bottle.name)
+                LabeledContent("Runtime", value: engine.map { LauncherInterface.engineName($0.kind) } ?? "Missing")
+                Divider()
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("Location").font(.subheadline)
+                        Text(bottle.path)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                    Button("Show in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: bottle.path)])
+                    }
+                }
+                if engine?.kind == .managedWine {
+                    Divider()
+                    HStack {
+                        if let engine, RuntimeInstaller.isCurrentRuntime(engine) {
+                            Label("Runtime is up to date", systemImage: "checkmark.circle")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Label("Updates before Steam launches", systemImage: "arrow.down.circle")
+                                .foregroundStyle(.orange)
+                        }
+                        Spacer()
+                        Button("Update Gaming Runtime", action: updateRuntime)
+                            .disabled(isWorking)
+                    }
+                } else if engine?.kind == .crossover {
+                    Text("This bottle uses the separately installed, commercial CrossOver runtime.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if supportsManagedActions {
+                LauncherCard("Steam & Shutdown", systemImage: "power") {
+                    LauncherToggle(
+                        title: "Start Steam minimized",
+                        detail: "Reduces Steam interface work while gaming. Open Steam from its tray icon when needed.",
+                        isOn: $startSteamMinimized
+                    )
+                    Divider()
+                    LauncherToggle(
+                        title: "Stop Wine when the launcher quits",
+                        detail: "Requests a clean shutdown of Windows apps in all managed bottles, then checks for remaining processes.",
+                        isOn: $stopWineOnQuit
+                    )
+                }
+            }
+            LauncherCard("Uninstall Bottle", systemImage: "trash") {
+                Text("Deletes this bottle, its Windows apps, installed games and saves stored inside it. The launcher and shared Wine runtime stay installed.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Uninstall Bottle…", role: .destructive) { showingUninstallConfirmation = true }
+                    .disabled(isWorking || isUninstalling)
+            }
+        }
+        .disabled(isUninstalling)
+    }
+
+    private var supportsManagedActions: Bool {
+        engine?.kind == .managedWine || engine?.kind == .wine
+    }
+
+    private var canLaunchSteam: Bool {
+        engine != nil && !isWorking && (engine?.kind == .crossover || Launcher.isSteamInstalled(in: bottle))
+    }
+
+    private func openCDrive() {
+        NSWorkspace.shared.open(
+            URL(fileURLWithPath: bottle.path, isDirectory: true)
+                .appending(path: "drive_c", directoryHint: .isDirectory)
+        )
+    }
+
     @ViewBuilder
     private var knownGameFixesSection: some View {
         if knownGameFixCount > 0 {
-            Section("Known Game Bugs & Fixes") {
+            LauncherCard("Known Game Bugs & Fixes", systemImage: "puzzlepiece.extension") {
                 Label(
                     "\(knownGameFixCount) automatic compatibility \(knownGameFixCount == 1 ? "fix" : "fixes") active",
                     systemImage: "checkmark.shield.fill"
                 )
-                .foregroundStyle(.green)
-                Text("Mac Wine Launcher quietly applies known fixes only to affected games. No action is needed unless a problem returns.")
+                .foregroundStyle(.secondary)
+                Text("Applied only to affected games. Open the details if a problem returns.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 DisclosureGroup(
                     "Troubleshooting details",
                     isExpanded: $showingKnownGameFixDetails
                 ) {
-                    dontPanicFixDetails
-                    cyberpunkFixDetails
-                    baldursGate3FixDetails
-                    marvelRivalsFixDetails
+                    VStack(alignment: .leading, spacing: 12) {
+                        dontPanicFixDetails
+                        cyberpunkFixDetails
+                        baldursGate3FixDetails
+                        marvelRivalsFixDetails
+                    }
+                    .padding(.top, 12)
                 }
             }
         }
