@@ -4,6 +4,15 @@ All notable changes to Mac Wine Launcher are recorded here.
 
 ## [Unreleased]
 
+## [0.6.9] - 2026-10-08
+
+- Request clean Windows app shutdown before stopping the bottle's Wine server.
+- Track exact bottle ownership and process birth times, including processes that
+  close their files while exiting. Persist verified identities across app restarts.
+- Show cleanup failures before quitting and explain when a Mac restart is required.
+- Add an optional minimized Steam start to reduce background interface CPU work,
+  keeping the Sikarugir graphics compatibility flags unchanged.
+
 ## [0.6.8] - 2026-09-23
 
 - Apply the targeted Unreal driver-warning setting to detected Black Myth: Wukong

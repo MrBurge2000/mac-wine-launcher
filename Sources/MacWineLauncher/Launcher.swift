@@ -119,7 +119,10 @@ enum Launcher {
         try run(
             engine: engine,
             bottle: bottle,
-            arguments: [steamPath] + steamArguments(for: engine),
+            arguments: [steamPath] + steamArguments(
+                for: engine,
+                startMinimized: UserDefaults.standard.bool(forKey: "startSteamMinimized")
+            ),
             graphicsBackend: graphicsBackend
         )
     }
@@ -321,6 +324,7 @@ enum Launcher {
         )
         process.currentDirectoryURL = applicationURL.deletingLastPathComponent()
         try process.run()
+        WineProcessLedger.shared.watch(bottle, using: engine)
     }
 
     static func windowsApplicationEnvironment(
@@ -1149,6 +1153,7 @@ enum Launcher {
             baseEnvironment: process.environment ?? [:]
         )
         try process.run()
+        WineProcessLedger.shared.watch(bottle, using: engine)
     }
 
     static func steamProcessEnvironment(
@@ -1209,8 +1214,8 @@ enum Launcher {
         return process
     }
 
-    static func steamArguments(for engine: Engine) -> [String] {
-        isSikarugir(engine) ? [] : steamCompatibilityArguments
+    static func steamArguments(for engine: Engine, startMinimized: Bool = false) -> [String] {
+        (isSikarugir(engine) ? [] : steamCompatibilityArguments) + (startMinimized ? ["-silent"] : [])
     }
 
     static func isSikarugir(_ engine: Engine) -> Bool {
@@ -1478,9 +1483,45 @@ enum Launcher {
     static func stopBottleProcesses(
         in bottle: Bottle,
         using engine: Engine,
-        gracefulTimeout: TimeInterval = 3,
+        gracefulTimeout: TimeInterval = 15,
         terminationTimeout: TimeInterval = 2
     ) throws {
+        // Keep verified identities throughout shutdown, including after a process
+        // closes its prefix files. Never signal a PID that has since been reused.
+        guard WineProcessIdentity.kernelInfo(getpid()) != nil,
+              !WineProcessLedger.allPIDs().isEmpty else {
+            throw LaunchError.processInspectionFailed
+        }
+        let isWine = engine.executableURL.lastPathComponent.hasPrefix("wine") &&
+            FileManager.default.isExecutableFile(atPath: engine.executableURL.path)
+        var tracked = bottleProcessIdentities(in: bottle, using: engine)
+        guard !tracked.isEmpty else {
+            if isWine { try checkForUnownedExitingWine() }
+            return
+        }
+        if isWine {
+            // Steam may reject a generic Windows session-close request. Give
+            // its own shutdown command a chance to flush Cloud/config state first.
+            if isSteamInstalled(in: bottle) {
+                let steamClose = configuredProcess(engine: engine, bottle: bottle,
+                    arguments: [steamExecutableURL(in: bottle).path, "-shutdown"])
+                try steamClose.run()
+                if let identity = WineProcessIdentity.current(steamClose.processIdentifier) { tracked.insert(identity) }
+                _ = waitForProcess(steamClose, timeout: gracefulTimeout)
+            }
+            let close = configuredProcess(engine: engine, bottle: bottle,
+                                          arguments: ["wineboot", "--end-session", "--shutdown"])
+            try close.run()
+            if let identity = WineProcessIdentity.current(close.processIdentifier) { tracked.insert(identity) }
+            let closed = waitForProcess(close, timeout: gracefulTimeout)
+            // A Windows app can decline WM_QUERYENDSESSION (for example unsaved
+            // work). Respect that response instead of immediately forcing it shut.
+            if closed && close.terminationStatus != 0 &&
+                !bottleProcessIdentities(in: bottle, using: engine).isEmpty {
+                throw LaunchError.bottleShutdownCancelled
+            }
+            tracked.formUnion(bottleProcessIdentities(in: bottle, using: engine))
+        }
         let wineserver = engine.executableURL
             .deletingLastPathComponent()
             .appending(path: "wineserver")
@@ -1492,78 +1533,60 @@ enum Launcher {
             process.standardOutput = FileHandle.nullDevice
             process.standardError = FileHandle.nullDevice
             try process.run()
-            _ = waitForProcess(process, timeout: gracefulTimeout)
+            _ = waitForProcess(process, timeout: terminationTimeout)
         }
 
-        var survivors = bottleProcessIDs(in: bottle, using: engine)
-        guard !survivors.isEmpty else { return }
+        tracked.formUnion(bottleProcessIdentities(in: bottle, using: engine))
+        var survivors = Set(tracked.filter(\.isCurrent))
+        guard !survivors.isEmpty else {
+            if isWine { try checkForUnownedExitingWine() }
+            return
+        }
         signalBottleProcesses(survivors, signal: SIGTERM)
         waitUntilBottleProcessesExit(
-            in: bottle,
-            using: engine,
+            tracked,
             timeout: terminationTimeout
         )
 
-        survivors = bottleProcessIDs(in: bottle, using: engine)
-        guard !survivors.isEmpty else { return }
+        tracked.formUnion(bottleProcessIdentities(in: bottle, using: engine))
+        survivors = Set(tracked.filter(\.isCurrent))
         signalBottleProcesses(survivors, signal: SIGKILL)
-        waitUntilBottleProcessesExit(in: bottle, using: engine, timeout: 1)
+        waitUntilBottleProcessesExit(tracked, timeout: terminationTimeout)
 
-        survivors = bottleProcessIDs(in: bottle, using: engine)
+        survivors = Set(tracked.filter(\.isCurrent))
         guard survivors.isEmpty else {
-            throw LaunchError.bottleShutdownFailed(survivors.sorted())
+            throw LaunchError.bottleShutdownFailed(survivors.map(\.pid).sorted())
         }
+        if isWine { try checkForUnownedExitingWine() }
     }
 
     static func bottleProcessIDs(in bottle: Bottle, using engine: Engine) -> Set<Int32> {
-        let bottleProcesses = processIDsReportedByLSOF(["-t", "+D", bottle.path])
-        guard !bottleProcesses.isEmpty else { return [] }
-        let wineserver = engine.executableURL
-            .deletingLastPathComponent()
-            .appending(path: "wineserver")
-        let engineProcesses = processIDsReportedByLSOF(["-t", engine.executableURL.path])
-            .union(processIDsReportedByLSOF(["-t", wineserver.path]))
-        return bottleProcesses.intersection(engineProcesses)
+        Set(bottleProcessIdentities(in: bottle, using: engine).map(\.pid))
     }
 
-    private static func processIDsReportedByLSOF(_ arguments: [String]) -> Set<Int32> {
-        let lsof = URL(fileURLWithPath: "/usr/sbin/lsof")
-        guard FileManager.default.isExecutableFile(atPath: lsof.path) else { return [] }
-        let process = Process()
-        let output = Pipe()
-        process.executableURL = lsof
-        process.arguments = arguments
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            guard waitForProcess(process, timeout: 5) else { return [] }
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            guard let text = String(data: data, encoding: .utf8) else { return [] }
-            let ownPID = Int32(ProcessInfo.processInfo.processIdentifier)
-            return Set(text
-                .split(whereSeparator: \.isNewline)
-                .compactMap { Int32($0.trimmingCharacters(in: .whitespaces)) }
-                .filter { $0 > 1 && $0 != ownPID })
-        } catch {
-            return []
-        }
+    static func bottleProcessIdentities(in bottle: Bottle, using engine: Engine) -> Set<WineProcessIdentity> {
+        let owned = WineProcessLedger.shared.identities(in: bottle, using: engine)
+        return owned
     }
 
-    private static func signalBottleProcesses(_ processIDs: Set<Int32>, signal: Int32) {
-        for processID in processIDs {
-            Darwin.kill(processID, signal)
+    static func checkForUnownedExitingWine() throws {
+        let unknown = WineProcessLedger.unownedExitingWinePIDs()
+        if !unknown.isEmpty { throw LaunchError.unownedWineStillExiting(unknown) }
+    }
+
+    private static func signalBottleProcesses(_ processes: Set<WineProcessIdentity>, signal: Int32) {
+        for process in processes where process.isCurrent {
+            Darwin.kill(process.pid, signal)
         }
     }
 
     private static func waitUntilBottleProcessesExit(
-        in bottle: Bottle,
-        using engine: Engine,
+        _ processes: Set<WineProcessIdentity>,
         timeout: TimeInterval
     ) {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            guard !bottleProcessIDs(in: bottle, using: engine).isEmpty else { return }
+            guard processes.contains(where: \.isCurrent) else { return }
             Thread.sleep(forTimeInterval: 0.1)
         }
     }
@@ -1598,6 +1621,9 @@ enum Launcher {
         case cyberpunkMissing
         case cyberpunkFailedToStart
         case bottleShutdownFailed([Int32])
+        case unownedWineStillExiting([Int32])
+        case bottleShutdownCancelled
+        case processInspectionFailed
         case engineCouldNotOpen
         case installerFailed(Int32)
         case displayConfigurationFailed(Int32)
@@ -1621,7 +1647,13 @@ enum Launcher {
             case .cyberpunkFailedToStart:
                 "Steam received the Cyberpunk 2077 launch request, but the game process did not appear within two minutes. Steam and other Windows apps were left running."
             case .bottleShutdownFailed(let processIDs):
-                "Mac Wine Launcher could not stop Wine processes: \(processIDs.map(String.init).joined(separator: ", ")). Restart the Mac before launching this bottle again."
+                "Wine processes still have not exited after shutdown and force termination: \(processIDs.map(String.init).joined(separator: ", ")). If they are stuck in graphics-driver cleanup, signals cannot release their GPU resources. Save your work and restart the Mac before launching this bottle again."
+            case .unownedWineStillExiting(let processIDs):
+                "This bottle’s identified processes have stopped, but older Wine processes are still trying to exit: \(processIDs.map(String.init).joined(separator: ", ")). Their bottle could not be verified, so they were left untouched. They may retain graphics resources. Save your work and restart the Mac to complete cleanup."
+            case .bottleShutdownCancelled:
+                "A Windows app declined shutdown. Save and close it normally, then try Stop Steam & Wine again."
+            case .processInspectionFailed:
+                "macOS process information could not be read, so Wine cleanup could not be verified. No unidentified processes were terminated."
             case .engineCouldNotOpen: "The compatibility engine could not be opened."
             case .installerFailed(let status): "The Steam installer exited with status \(status)."
             case .displayConfigurationFailed(let status):

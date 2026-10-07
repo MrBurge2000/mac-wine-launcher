@@ -189,6 +189,7 @@ private struct BottleDetail: View {
     @State private var runtimeProgress: RuntimeInstaller.InstallProgress?
     @State private var steamProgress: Launcher.SteamInstallProgress?
     @State private var operationStatus: String?
+    @State private var cleanupWarning: String?
     @State private var graphicsBackend: GraphicsBackend = .automatic
     @State private var displayProfile: DisplayProfile = .standard
     @State private var mouseCaptureProfile: MouseCaptureProfile = .menuSafe
@@ -196,6 +197,7 @@ private struct BottleDetail: View {
     @State private var recentWindowsApplications: [RecentWindowsApplication] = []
     @AppStorage(MacWineLauncherAppDelegate.stopWineOnQuitKey)
     private var stopWineOnQuit = true
+    @AppStorage("startSteamMinimized") private var startSteamMinimized = false
 
     var body: some View {
         Form {
@@ -249,6 +251,14 @@ private struct BottleDetail: View {
                 }
                 if engine?.kind == .managedWine || engine?.kind == .wine {
                     Toggle("Stop Steam and Wine when Mac Wine Launcher quits", isOn: $stopWineOnQuit)
+                    if let cleanupWarning {
+                        Label(cleanupWarning, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                    }
+                    Toggle("Start Steam minimized", isOn: $startSteamMinimized)
+                    Text("Keeps Steam in the background at launch to reduce interface CPU use while gaming. Open it from its tray icon when needed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Text("Enabled by default so invisible Wine helpers cannot keep using CPU and battery after this app closes.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -469,6 +479,12 @@ private struct BottleDetail: View {
                 mouseCaptureProfile = profile
             }
             loadRecentWindowsApplications()
+        }
+        .task(id: bottle.id) {
+            let exiting = await Task.detached { WineProcessLedger.unownedExitingWinePIDs() }.value
+            if !exiting.isEmpty {
+                cleanupWarning = "Older Wine processes are still trying to exit (\(exiting.map(String.init).joined(separator: ", "))). Their bottle cannot be verified. Save your work and restart the Mac to finish cleanup before gaming."
+            }
         }
         .onChange(of: graphicsBackend) { _, newValue in
             UserDefaults.standard.set(newValue.rawValue, forKey: graphicsPreferenceKey)

@@ -150,11 +150,18 @@ for the rare case where Steam's web cache genuinely needs to be rebuilt.
 
 Since version 0.5.4, Mac Wine Launcher also owns the shutdown lifecycle of its managed bottles. Closing the
 last Mac Wine Launcher window or choosing Quit stops Steam and Wine by default. Shutdown first
-asks the bottle's `wineserver` to exit, then terminates and finally force-stops only
-processes proven to have files open inside that bottle. This prevents detached
-`steamwebhelper.exe` and `wineserver` processes from silently consuming CPU and battery.
+asks Windows apps to close cleanly with `wineboot --end-session --shutdown`, allowing
+15 seconds per graceful request for cleanup. An app that declines shutdown is left open. Remaining
+processes are stopped through that bottle's server, then SIGTERM and SIGKILL if needed.
+Ownership is verified against the Wine runtime and exact bottle prefix or open files.
+Recorded PID/start-time identities survive closed files and launcher restarts; reused
+PIDs are never treated as the original process. Failed cleanup is shown before quit.
+If a process is stuck exiting inside the macOS graphics driver, restart the Mac to
+release its remaining resources. This cannot be repaired by repeatedly killing Wine.
 The Steam section includes a visible **Stop Steam & Wine** button and an opt-out toggle
 for users who intentionally want their Windows apps to continue after Mac Wine Launcher quits.
+**Start Steam minimized** reduces background interface redraw work while gaming,
+without changing the runtime's compatibility flags. Its tray icon opens Steam when needed.
 
 **Install Windows Steam** downloads a fresh copy of Valve's official installer every
 time, validates that the download is a complete Windows executable, shows download and
