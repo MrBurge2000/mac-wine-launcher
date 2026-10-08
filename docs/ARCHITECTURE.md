@@ -10,7 +10,10 @@ Mac Wine Launcher is a SwiftUI macOS application built as a Swift Package execut
 - `Launcher` owns Steam installation, Windows process launch, renderer selection,
   registry configuration, UI health checks, and bottle-scoped shutdown.
 - `ContentView` presents bottle, Steam, Windows application, display, graphics, known-fix,
-  and uninstall workflows.
+  and uninstall workflows in four sections. View state is isolated per bottle; section
+  changes reset the scroll position without changing persistent preferences.
+- `InterfaceComponents` supplies native presentation components and display labels.
+  Presentation labels do not change stored runtime, renderer, or display identifiers.
 - `MacWineLauncherAppDelegate` performs managed-bottle cleanup when the macOS app terminates.
 
 ## Trust boundaries

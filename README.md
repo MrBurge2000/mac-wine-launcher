@@ -102,7 +102,7 @@ downloads are pinned to trusted SHA-256 checksums and stored under Mac Wine Laun
 Application Support directory. CrossOver and system Wine installations remain
 supported, while Whisky is detected only for existing users.
 
-The free runtime includes a switchable graphics stack. **AAA Auto** uses D3DMetal for
+The free runtime includes a switchable graphics stack. **Automatic** uses D3DMetal for
 64-bit DirectX 11 and 12 games on supported Apple Silicon Macs. DXMT and DXVK provide
 alternate DirectX 10/11 paths, D9VK accelerates many DirectX 9 games, and WineD3D is
 the conservative fallback. Mac Wine Launcher also enables Rosetta's AVX advertisement on
@@ -115,6 +115,12 @@ launch arguments are parsed without a shell, each app starts from its own folder
 recent apps are remembered separately for each bottle. The selected graphics backend
 is shared with directly launched apps.
 
+The bottle interface keeps launch actions in **Apps**, renderer and resolution choices
+in **Graphics & Display**, repair tools and known-game fixes in **Troubleshooting**, and
+runtime updates, shutdown preferences, and uninstall controls in **Bottle**. Changing
+sections does not change the selected runtime or renderer. Existing bottles, saved
+preferences, and recent-app history are retained when updating the launcher.
+
 The managed runtime also installs WineHQ's pinned 32-bit and 64-bit ICU compatibility
 libraries into each bottle. This supplies the Windows Unicode system DLLs expected by
 current PyQt6 and other modern Windows applications. Packaged PyQt6/PySide6 apps are
@@ -122,8 +128,8 @@ detected automatically and Qt WebEngine uses a Wine-safe software rendering fall
 without changing the graphics mode used by games or other Windows apps.
 
 Per-bottle display profiles control Wine's macOS Retina mode and Windows DPI. The
-recommended Retina profile renders Steam at 2× resolution with 200% Windows scaling,
-keeping the interface readable while exposing higher display resolutions to games.
+recommended Match screen profile uses the Mac’s logical display resolution without
+doubling it. Existing bottles migrate to this default once; Retina is an explicit opt-in.
 Each game still controls its own fullscreen resolution; native Retina is sharpest,
 while a lower in-game resolution usually delivers better frame rate.
 
@@ -131,6 +137,9 @@ Known game fixes are scoped to the affected executable and applied silently. Whe
 installed title needs a game-specific input or graphics workaround, Mac Wine Launcher enables
 it automatically without changing other games. A collapsed **Known Game Bugs & Fixes**
 section exposes the affected title and manual fallbacks only for troubleshooting.
+Current rules cover Cyberpunk 2077 and Baldur’s Gate 3 launcher failures, Marvel Rivals’
+false Wine GPU-driver warning, and Don’t Panic’s pointer-capture bug. Existing Steam
+launch options and unrelated game settings are preserved.
 
 No translation layer can guarantee every Windows game. Renderer-specific bugs,
 unsupported launchers, Windows driver requirements, DRM, and developer-disabled or
@@ -147,11 +156,18 @@ for the rare case where Steam's web cache genuinely needs to be rebuilt.
 
 Since version 0.5.4, Mac Wine Launcher also owns the shutdown lifecycle of its managed bottles. Closing the
 last Mac Wine Launcher window or choosing Quit stops Steam and Wine by default. Shutdown first
-asks the bottle's `wineserver` to exit, then terminates and finally force-stops only
-processes proven to have files open inside that bottle. This prevents detached
-`steamwebhelper.exe` and `wineserver` processes from silently consuming CPU and battery.
+asks Windows apps to close cleanly with `wineboot --end-session --shutdown`, allowing
+15 seconds per graceful request for cleanup. An app that declines shutdown is left open. Remaining
+processes are stopped through that bottle's server, then SIGTERM and SIGKILL if needed.
+Ownership is verified against the Wine runtime and exact bottle prefix or open files.
+Recorded PID/start-time identities survive closed files and launcher restarts; reused
+PIDs are never treated as the original process. Failed cleanup is shown before quit.
+If a process is stuck exiting inside the macOS graphics driver, restart the Mac to
+release its remaining resources. This cannot be repaired by repeatedly killing Wine.
 The Steam section includes a visible **Stop Steam & Wine** button and an opt-out toggle
 for users who intentionally want their Windows apps to continue after Mac Wine Launcher quits.
+**Start Steam minimized** reduces background interface redraw work while gaming,
+without changing the runtime's compatibility flags. Its tray icon opens Steam when needed.
 
 **Install Windows Steam** downloads a fresh copy of Valve's official installer every
 time, validates that the download is a complete Windows executable, shows download and

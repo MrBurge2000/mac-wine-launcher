@@ -18,6 +18,15 @@ enum Launcher {
     static let steamInstallerURL = URL(string: "https://cdn.akamai.steamstatic.com/client/installer/SteamSetup.exe")!
     static let minimumSteamInstallerSize = 1_000_000
     static let dontPanicExecutableName = "Don't Panic! It is Just Turbulence.exe"
+    static let cyberpunkSteamAppID = "1091500"
+    static let cyberpunkExecutableName = "Cyberpunk2077.exe"
+    static let cyberpunkLauncherSkipOption = "--launcher-skip"
+    static let cyberpunkLaunchArguments = [cyberpunkLauncherSkipOption]
+    static let baldursGate3SteamAppID = "1086940"
+    static let baldursGate3ExecutableName = "bg3_dx11.exe"
+    static let baldursGate3LauncherSkipOption = "--skip-launcher"
+    static let marvelRivalsExecutableName = "Marvel-Win64-Shipping.exe"
+    static let marvelRivalsBadDriverWarningKey = "r.WarnOfBadDrivers"
     // Retained for advanced/legacy Wine installs. The managed Sikarugir runtime
     // carries its own Steam-specific CEF fixes and must launch without these flags.
     static let steamCompatibilityArguments = [
@@ -80,7 +89,7 @@ enum Launcher {
         in bottle: Bottle,
         using engine: Engine,
         graphicsBackend: GraphicsBackend = .automatic,
-        displayProfile: DisplayProfile? = nil,
+        displayProfile: DisplayProfile? = .standard,
         mouseCaptureProfile: MouseCaptureProfile = .menuSafe
     ) throws {
         if engine.kind == .crossover {
@@ -110,7 +119,10 @@ enum Launcher {
         try run(
             engine: engine,
             bottle: bottle,
-            arguments: [steamPath] + steamArguments(for: engine),
+            arguments: [steamPath] + steamArguments(
+                for: engine,
+                startMinimized: UserDefaults.standard.bool(forKey: "startSteamMinimized")
+            ),
             graphicsBackend: graphicsBackend
         )
     }
@@ -121,11 +133,42 @@ enum Launcher {
         timeout: Duration = .seconds(30)
     ) async throws {
         guard engine.kind != .crossover, engine.kind != .whisky else { return }
+        try await waitForWindowsProcess(
+            named: "steamwebhelper.exe",
+            in: bottle,
+            using: engine,
+            timeout: timeout,
+            failure: .steamUIFailedToStart
+        )
+    }
+
+    static func waitForCyberpunk(
+        in bottle: Bottle,
+        using engine: Engine,
+        timeout: Duration = .seconds(120)
+    ) async throws {
+        guard engine.kind != .crossover, engine.kind != .whisky else { return }
+        try await waitForWindowsProcess(
+            named: cyberpunkExecutableName,
+            in: bottle,
+            using: engine,
+            timeout: timeout,
+            failure: .cyberpunkFailedToStart
+        )
+    }
+
+    private static func waitForWindowsProcess(
+        named processName: String,
+        in bottle: Bottle,
+        using engine: Engine,
+        timeout: Duration,
+        failure: LaunchError
+    ) async throws {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: timeout)
         repeat {
             if isWindowsProcessRunning(
-                named: "steamwebhelper.exe",
+                named: processName,
                 in: bottle,
                 using: engine
             ) {
@@ -133,7 +176,7 @@ enum Launcher {
             }
             try await Task.sleep(for: .seconds(1))
         } while clock.now < deadline
-        throw LaunchError.steamUIFailedToStart
+        throw failure
     }
 
     static func taskListContainsProcess(_ output: String, named processName: String) -> Bool {
@@ -186,7 +229,7 @@ enum Launcher {
         in bottle: Bottle,
         using engine: Engine,
         graphicsBackend: GraphicsBackend = .automatic,
-        displayProfile: DisplayProfile? = nil,
+        displayProfile: DisplayProfile? = .standard,
         mouseCaptureProfile: MouseCaptureProfile = .menuSafe
     ) throws {
         guard engine.kind != .crossover, engine.kind != .whisky else {
@@ -238,7 +281,7 @@ enum Launcher {
         in bottle: Bottle,
         using engine: Engine,
         graphicsBackend: GraphicsBackend = .automatic,
-        displayProfile: DisplayProfile? = nil
+        displayProfile: DisplayProfile? = .standard
     ) throws {
         guard engine.kind != .crossover else {
             throw LaunchError.guiEngine(
@@ -281,6 +324,7 @@ enum Launcher {
         )
         process.currentDirectoryURL = applicationURL.deletingLastPathComponent()
         try process.run()
+        WineProcessLedger.shared.watch(bottle, using: engine)
     }
 
     static func windowsApplicationEnvironment(
@@ -301,6 +345,12 @@ enum Launcher {
             return baseEnvironment
         }
 
+        return qtSoftwareRenderingEnvironment(baseEnvironment: baseEnvironment)
+    }
+
+    static func qtSoftwareRenderingEnvironment(
+        baseEnvironment: [String: String]
+    ) -> [String: String] {
         var environment = baseEnvironment
         environment["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
         let compatibilityFlags = ["--disable-gpu", "--disable-gpu-compositing"]
@@ -453,6 +503,315 @@ enum Launcher {
             in: steamDirectory,
             fileManager: fileManager
         )
+        if isCyberpunkInstalled(in: bottle, fileManager: fileManager) {
+            try ensureCyberpunkLauncherSkip(in: bottle, fileManager: fileManager)
+        }
+        if isBaldursGate3Installed(in: bottle, fileManager: fileManager) {
+            try ensureSteamLaunchOption(
+                in: bottle,
+                appID: baldursGate3SteamAppID,
+                requiredOption: baldursGate3LauncherSkipOption,
+                fileManager: fileManager
+            )
+        }
+        if isMarvelRivalsInstalled(in: bottle, fileManager: fileManager) {
+            try ensureMarvelRivalsDriverWarningDisabled(
+                in: bottle,
+                fileManager: fileManager
+            )
+        }
+        let wukongExecutable = steamExecutableURL(in: bottle)
+            .deletingLastPathComponent()
+            .appending(path: "steamapps/common/BlackMythWukong/b1/Binaries/Win64/b1-Win64-Shipping.exe")
+        if fileManager.fileExists(atPath: wukongExecutable.path) {
+            try ensureUnrealDriverWarningDisabled(in: bottle, gameDirectory: "b1", fileManager: fileManager)
+        }
+    }
+
+    static func ensureMarvelRivalsDriverWarningDisabled(
+        in bottle: Bottle,
+        fileManager: FileManager = .default
+    ) throws {
+        try ensureUnrealDriverWarningDisabled(in: bottle, gameDirectory: "Marvel", fileManager: fileManager)
+    }
+
+    // Only explicitly supported games: never suppress unrelated driver dialogs globally.
+    static func ensureUnrealDriverWarningDisabled(
+        in bottle: Bottle,
+        gameDirectory: String,
+        fileManager: FileManager = .default
+    ) throws {
+        guard ["Marvel", "b1"].contains(gameDirectory) else { return }
+        let usersDirectory = URL(fileURLWithPath: bottle.path, isDirectory: true)
+            .appending(path: "drive_c/users", directoryHint: .isDirectory)
+        guard let users = try? fileManager.contentsOfDirectory(
+            at: usersDirectory,
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        for user in users {
+            guard user.lastPathComponent.caseInsensitiveCompare("Public") != .orderedSame,
+                  let values = try? user.resourceValues(
+                    forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
+                  ),
+                  values.isDirectory == true,
+                  values.isSymbolicLink != true else {
+                continue
+            }
+            for platform in ["Windows", "WindowsClient"] {
+                let configuration = user.appending(
+                    path: "AppData/Local/\(gameDirectory)/Saved/Config/\(platform)/Engine.ini",
+                    directoryHint: .notDirectory
+                )
+                let contents = (try? String(contentsOf: configuration, encoding: .utf8)) ?? ""
+                let consolePatched = patchINISetting(
+                    in: contents,
+                    section: "ConsoleVariables",
+                    key: marvelRivalsBadDriverWarningKey,
+                    value: "0"
+                )
+                let patched = patchINISetting(
+                    in: consolePatched,
+                    section: "SystemSettings",
+                    key: marvelRivalsBadDriverWarningKey,
+                    value: "0"
+                )
+                guard patched != contents else { continue }
+                try fileManager.createDirectory(
+                    at: configuration.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try patched.write(to: configuration, atomically: true, encoding: .utf8)
+            }
+        }
+    }
+
+    static func patchINISetting(
+        in contents: String,
+        section: String,
+        key: String,
+        value: String
+    ) -> String {
+        let lineSeparator = contents.contains("\r\n") ? "\r\n" : "\n"
+        var lines = contents.components(separatedBy: lineSeparator)
+        if contents.isEmpty {
+            lines = []
+        } else if lines.last == "" {
+            lines.removeLast()
+        }
+
+        let expectedSection = "[\(section)]".lowercased()
+        if let sectionIndex = lines.firstIndex(where: {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == expectedSection
+        }) {
+            let sectionEnd = lines[(sectionIndex + 1)...].firstIndex(where: {
+                let trimmed = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.hasPrefix("[") && trimmed.hasSuffix("]")
+            }) ?? lines.endIndex
+            let expectedKey = key.lowercased()
+            if let settingIndex = lines[(sectionIndex + 1)..<sectionEnd].firstIndex(where: {
+                guard let separator = $0.firstIndex(of: "=") else { return false }
+                return $0[..<separator]
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased() == expectedKey
+            }) {
+                let indentation = leadingWhitespace(in: lines[settingIndex])
+                lines[settingIndex] = "\(indentation)\(key)=\(value)"
+            } else {
+                lines.insert("\(key)=\(value)", at: sectionEnd)
+            }
+        } else {
+            if !lines.isEmpty, !lines.last!.isEmpty {
+                lines.append("")
+            }
+            lines.append("[\(section)]")
+            lines.append("\(key)=\(value)")
+        }
+        return lines.joined(separator: lineSeparator) + lineSeparator
+    }
+
+    static func ensureCyberpunkLauncherSkip(
+        in bottle: Bottle,
+        fileManager: FileManager = .default
+    ) throws {
+        try ensureSteamLaunchOption(
+            in: bottle,
+            appID: cyberpunkSteamAppID,
+            requiredOption: cyberpunkLauncherSkipOption,
+            fileManager: fileManager
+        )
+    }
+
+    static func ensureSteamLaunchOption(
+        in bottle: Bottle,
+        appID: String,
+        requiredOption: String,
+        fileManager: FileManager = .default
+    ) throws {
+        let userdata = steamExecutableURL(in: bottle)
+            .deletingLastPathComponent()
+            .appending(path: "userdata", directoryHint: .isDirectory)
+        guard let users = try? fileManager.contentsOfDirectory(
+            at: userdata,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        for user in users {
+            let localConfig = user.appending(
+                path: "config/localconfig.vdf",
+                directoryHint: .notDirectory
+            )
+            guard let contents = try? String(contentsOf: localConfig, encoding: .utf8) else {
+                continue
+            }
+            let patched = patchSteamLaunchOption(
+                in: contents,
+                appID: appID,
+                requiredOption: requiredOption
+            )
+            guard patched != contents else { continue }
+            try patched.write(to: localConfig, atomically: true, encoding: .utf8)
+        }
+    }
+
+    static func patchSteamLaunchOption(
+        in contents: String,
+        appID: String,
+        requiredOption: String
+    ) -> String {
+        let lineSeparator = contents.contains("\r\n") ? "\r\n" : "\n"
+        var lines = contents.components(separatedBy: lineSeparator)
+        guard let appsKey = lines.firstIndex(where: {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "\"apps\""
+        }),
+        let appsOpen = nextVDFOpeningBrace(in: lines, after: appsKey),
+        let appsClose = closingVDFBrace(in: lines, openingAt: appsOpen) else {
+            return contents
+        }
+
+        var depth = 1
+        var appKey: Int?
+        if appsOpen + 1 < appsClose {
+            for index in (appsOpen + 1)..<appsClose {
+                if depth == 1,
+                   lines[index].trimmingCharacters(in: .whitespacesAndNewlines) == "\"\(appID)\"" {
+                    appKey = index
+                    break
+                }
+                depth += vdfBraceDelta(in: lines[index])
+            }
+        }
+
+        if let appKey,
+           let appOpen = nextVDFOpeningBrace(in: lines, after: appKey),
+           let appClose = closingVDFBrace(in: lines, openingAt: appOpen) {
+            if appOpen + 1 < appClose {
+                for index in (appOpen + 1)..<appClose {
+                    guard let current = vdfQuotedValue(
+                        forKey: "LaunchOptions",
+                        in: lines[index]
+                    ) else { continue }
+                    let options = current.split(whereSeparator: \.isWhitespace).map(String.init)
+                    guard !options.contains(requiredOption) else { return contents }
+                    let merged = current.isEmpty
+                        ? requiredOption
+                        : current + " " + requiredOption
+                    let indentation = leadingWhitespace(in: lines[index])
+                    lines[index] = indentation + "\"LaunchOptions\"\t\t\"\(merged)\""
+                    return lines.joined(separator: lineSeparator)
+                }
+            }
+
+            let indentation = leadingWhitespace(in: lines[appClose]) + "\t"
+            lines.insert(
+                indentation + "\"LaunchOptions\"\t\t\"\(requiredOption)\"",
+                at: appClose
+            )
+            return lines.joined(separator: lineSeparator)
+        }
+
+        let childIndentation = leadingWhitespace(in: lines[appsClose]) + "\t"
+        let valueIndentation = childIndentation + "\t"
+        lines.insert(contentsOf: [
+            childIndentation + "\"\(appID)\"",
+            childIndentation + "{",
+            valueIndentation + "\"LaunchOptions\"\t\t\"\(requiredOption)\"",
+            childIndentation + "}"
+        ], at: appsClose)
+        return lines.joined(separator: lineSeparator)
+    }
+
+    private static func nextVDFOpeningBrace(in lines: [String], after index: Int) -> Int? {
+        guard index + 1 < lines.count else { return nil }
+        for candidate in (index + 1)..<lines.count {
+            let trimmed = lines[candidate].trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { continue }
+            return trimmed == "{" ? candidate : nil
+        }
+        return nil
+    }
+
+    private static func closingVDFBrace(in lines: [String], openingAt index: Int) -> Int? {
+        var depth = 0
+        for candidate in index..<lines.count {
+            depth += vdfBraceDelta(in: lines[candidate])
+            if depth == 0 { return candidate }
+        }
+        return nil
+    }
+
+    private static func vdfBraceDelta(in line: String) -> Int {
+        var delta = 0
+        var insideQuote = false
+        var escaped = false
+        for character in line {
+            if escaped {
+                escaped = false
+                continue
+            }
+            if insideQuote, character == "\\" {
+                escaped = true
+            } else if character == "\"" {
+                insideQuote.toggle()
+            } else if !insideQuote, character == "{" {
+                delta += 1
+            } else if !insideQuote, character == "}" {
+                delta -= 1
+            }
+        }
+        return delta
+    }
+
+    private static func vdfQuotedValue(forKey key: String, in line: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefix = "\"\(key)\""
+        guard trimmed.lowercased().hasPrefix(prefix.lowercased()) else { return nil }
+        var remainder = String(trimmed.dropFirst(prefix.count))
+            .trimmingCharacters(in: .whitespaces)
+        guard remainder.first == "\"" else { return nil }
+        remainder.removeFirst()
+        var value = ""
+        var escaped = false
+        for character in remainder {
+            if escaped {
+                value.append("\\")
+                value.append(character)
+                escaped = false
+            } else if character == "\\" {
+                escaped = true
+            } else if character == "\"" {
+                return value
+            } else {
+                value.append(character)
+            }
+        }
+        return nil
+    }
+
+    private static func leadingWhitespace(in line: String) -> String {
+        String(line.prefix(while: \.isWhitespace))
     }
 
     static func removeSteamUpdateInhibitor(
@@ -648,6 +1007,88 @@ enum Launcher {
         fileManager.isExecutableFile(atPath: dontPanicExecutableURL(in: bottle).path)
     }
 
+    static func cyberpunkExecutableURL(in bottle: Bottle) -> URL {
+        URL(fileURLWithPath: bottle.path, isDirectory: true)
+            .appending(
+                path: "drive_c/Program Files (x86)/Steam/steamapps/common/Cyberpunk 2077/bin/x64",
+                directoryHint: .isDirectory
+            )
+            .appending(path: cyberpunkExecutableName)
+    }
+
+    static func isCyberpunkInstalled(
+        in bottle: Bottle,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        fileManager.isExecutableFile(atPath: cyberpunkExecutableURL(in: bottle).path)
+    }
+
+    static func baldursGate3ExecutableURL(in bottle: Bottle) -> URL {
+        URL(fileURLWithPath: bottle.path, isDirectory: true)
+            .appending(
+                path: "drive_c/Program Files (x86)/Steam/steamapps/common/Baldurs Gate 3/bin",
+                directoryHint: .isDirectory
+            )
+            .appending(path: baldursGate3ExecutableName)
+    }
+
+    static func isBaldursGate3Installed(
+        in bottle: Bottle,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        fileManager.isExecutableFile(atPath: baldursGate3ExecutableURL(in: bottle).path)
+    }
+
+    static func marvelRivalsExecutableURL(in bottle: Bottle) -> URL {
+        URL(fileURLWithPath: bottle.path, isDirectory: true)
+            .appending(
+                path: "drive_c/Program Files (x86)/Steam/steamapps/common/MarvelRivals/MarvelGame/Marvel/Binaries/Win64",
+                directoryHint: .isDirectory
+            )
+            .appending(path: marvelRivalsExecutableName)
+    }
+
+    static func isMarvelRivalsInstalled(
+        in bottle: Bottle,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        fileManager.isExecutableFile(atPath: marvelRivalsExecutableURL(in: bottle).path)
+    }
+
+    static func steamGameArguments(
+        appID: String,
+        additionalArguments: [String] = []
+    ) -> [String] {
+        ["-applaunch", appID] + additionalArguments
+    }
+
+    static func launchCyberpunk(
+        in bottle: Bottle,
+        using engine: Engine,
+        graphicsBackend: GraphicsBackend = .automatic,
+        displayProfile: DisplayProfile? = .standard
+    ) throws {
+        guard isSteamInstalled(in: bottle) else {
+            throw LaunchError.steamMissing
+        }
+        guard isCyberpunkInstalled(in: bottle) else {
+            throw LaunchError.cyberpunkMissing
+        }
+        try repairSteamIntegrity(in: bottle, using: engine)
+        if let displayProfile {
+            try applyDisplayProfile(displayProfile, in: bottle, using: engine)
+        }
+        try run(
+            engine: engine,
+            bottle: bottle,
+            arguments: [steamExecutableURL(in: bottle).path] + steamGameArguments(
+                appID: cyberpunkSteamAppID,
+                additionalArguments: cyberpunkLaunchArguments
+            ),
+            graphicsBackend: graphicsBackend
+        )
+    }
+
     static func validateSteamInstaller(at url: URL) throws {
         guard let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
               let size = values.fileSize,
@@ -712,12 +1153,15 @@ enum Launcher {
             baseEnvironment: process.environment ?? [:]
         )
         try process.run()
+        WineProcessLedger.shared.watch(bottle, using: engine)
     }
 
     static func steamProcessEnvironment(
         baseEnvironment: [String: String]
     ) -> [String: String] {
-        var environment = baseEnvironment
+        var environment = qtSoftwareRenderingEnvironment(
+            baseEnvironment: baseEnvironment
+        )
         let cleanWindowManagerOverride = "dwmapi=b"
         if let existing = environment["WINEDLLOVERRIDES"], !existing.isEmpty {
             let overrides = existing
@@ -770,8 +1214,8 @@ enum Launcher {
         return process
     }
 
-    static func steamArguments(for engine: Engine) -> [String] {
-        isSikarugir(engine) ? [] : steamCompatibilityArguments
+    static func steamArguments(for engine: Engine, startMinimized: Bool = false) -> [String] {
+        (isSikarugir(engine) ? [] : steamCompatibilityArguments) + (startMinimized ? ["-silent"] : [])
     }
 
     static func isSikarugir(_ engine: Engine) -> Bool {
@@ -789,7 +1233,9 @@ enum Launcher {
         environment["WINEPREFIX"] = bottle.path
         environment["WINEDEBUG"] = "-all"
 
-        guard isSikarugir(engine) else { return environment }
+        guard isSikarugir(engine) else {
+            return optimizedGamingEnvironment(baseEnvironment: environment)
+        }
 
         let bin = engine.executableURL.deletingLastPathComponent()
         let bundle = bin.deletingLastPathComponent()
@@ -827,6 +1273,21 @@ enum Launcher {
             environment["ROSETTA_ADVERTISE_AVX"] = "1"
         }
         #endif
+        return optimizedGamingEnvironment(baseEnvironment: environment)
+    }
+
+    /// Disables diagnostic output that can add disk I/O or CPU work while a
+    /// game is running. These settings do not alter rendering quality,
+    /// renderer selection, shader caches, or game compatibility features.
+    static func optimizedGamingEnvironment(
+        baseEnvironment: [String: String]
+    ) -> [String: String] {
+        var environment = baseEnvironment
+        environment["DXVK_LOG_LEVEL"] = "none"
+        environment["DXVK_LOG_PATH"] = "none"
+        environment["DXMT_LOG_LEVEL"] = "none"
+        environment["VKD3D_DEBUG"] = "none"
+        environment["VKD3D_SHADER_DEBUG"] = "none"
         return environment
     }
 
@@ -988,7 +1449,6 @@ enum Launcher {
         environment.removeValue(forKey: "CX_D3DMETALPATH")
         environment.removeValue(forKey: "CX_APPLEGPT_LIBD3DSHARED_PATH")
         environment.removeValue(forKey: "CX_APPLEGPTK_LIBD3DSHARED_PATH")
-        environment.removeValue(forKey: "DXMT_LOG_LEVEL")
 
         let backend = resolvedGraphicsBackend(requested, for: engine)
         guard let folder = backend.rendererFolderName else { return }
@@ -1004,8 +1464,6 @@ enum Launcher {
             environment["CX_D3DMETALPATH"] = external.path
             environment["CX_APPLEGPT_LIBD3DSHARED_PATH"] = sharedLibrary
             environment["CX_APPLEGPTK_LIBD3DSHARED_PATH"] = sharedLibrary
-        } else if backend == .dxmt {
-            environment["DXMT_LOG_LEVEL"] = "none"
         }
     }
 
@@ -1025,9 +1483,45 @@ enum Launcher {
     static func stopBottleProcesses(
         in bottle: Bottle,
         using engine: Engine,
-        gracefulTimeout: TimeInterval = 3,
+        gracefulTimeout: TimeInterval = 15,
         terminationTimeout: TimeInterval = 2
     ) throws {
+        // Keep verified identities throughout shutdown, including after a process
+        // closes its prefix files. Never signal a PID that has since been reused.
+        guard WineProcessIdentity.kernelInfo(getpid()) != nil,
+              !WineProcessLedger.allPIDs().isEmpty else {
+            throw LaunchError.processInspectionFailed
+        }
+        let isWine = engine.executableURL.lastPathComponent.hasPrefix("wine") &&
+            FileManager.default.isExecutableFile(atPath: engine.executableURL.path)
+        var tracked = bottleProcessIdentities(in: bottle, using: engine)
+        guard !tracked.isEmpty else {
+            if isWine { try checkForUnownedExitingWine() }
+            return
+        }
+        if isWine {
+            // Steam may reject a generic Windows session-close request. Give
+            // its own shutdown command a chance to flush Cloud/config state first.
+            if isSteamInstalled(in: bottle) {
+                let steamClose = configuredProcess(engine: engine, bottle: bottle,
+                    arguments: [steamExecutableURL(in: bottle).path, "-shutdown"])
+                try steamClose.run()
+                if let identity = WineProcessIdentity.current(steamClose.processIdentifier) { tracked.insert(identity) }
+                _ = waitForProcess(steamClose, timeout: gracefulTimeout)
+            }
+            let close = configuredProcess(engine: engine, bottle: bottle,
+                                          arguments: ["wineboot", "--end-session", "--shutdown"])
+            try close.run()
+            if let identity = WineProcessIdentity.current(close.processIdentifier) { tracked.insert(identity) }
+            let closed = waitForProcess(close, timeout: gracefulTimeout)
+            // A Windows app can decline WM_QUERYENDSESSION (for example unsaved
+            // work). Respect that response instead of immediately forcing it shut.
+            if closed && close.terminationStatus != 0 &&
+                !bottleProcessIdentities(in: bottle, using: engine).isEmpty {
+                throw LaunchError.bottleShutdownCancelled
+            }
+            tracked.formUnion(bottleProcessIdentities(in: bottle, using: engine))
+        }
         let wineserver = engine.executableURL
             .deletingLastPathComponent()
             .appending(path: "wineserver")
@@ -1039,78 +1533,60 @@ enum Launcher {
             process.standardOutput = FileHandle.nullDevice
             process.standardError = FileHandle.nullDevice
             try process.run()
-            _ = waitForProcess(process, timeout: gracefulTimeout)
+            _ = waitForProcess(process, timeout: terminationTimeout)
         }
 
-        var survivors = bottleProcessIDs(in: bottle, using: engine)
-        guard !survivors.isEmpty else { return }
+        tracked.formUnion(bottleProcessIdentities(in: bottle, using: engine))
+        var survivors = Set(tracked.filter(\.isCurrent))
+        guard !survivors.isEmpty else {
+            if isWine { try checkForUnownedExitingWine() }
+            return
+        }
         signalBottleProcesses(survivors, signal: SIGTERM)
         waitUntilBottleProcessesExit(
-            in: bottle,
-            using: engine,
+            tracked,
             timeout: terminationTimeout
         )
 
-        survivors = bottleProcessIDs(in: bottle, using: engine)
-        guard !survivors.isEmpty else { return }
+        tracked.formUnion(bottleProcessIdentities(in: bottle, using: engine))
+        survivors = Set(tracked.filter(\.isCurrent))
         signalBottleProcesses(survivors, signal: SIGKILL)
-        waitUntilBottleProcessesExit(in: bottle, using: engine, timeout: 1)
+        waitUntilBottleProcessesExit(tracked, timeout: terminationTimeout)
 
-        survivors = bottleProcessIDs(in: bottle, using: engine)
+        survivors = Set(tracked.filter(\.isCurrent))
         guard survivors.isEmpty else {
-            throw LaunchError.bottleShutdownFailed(survivors.sorted())
+            throw LaunchError.bottleShutdownFailed(survivors.map(\.pid).sorted())
         }
+        if isWine { try checkForUnownedExitingWine() }
     }
 
     static func bottleProcessIDs(in bottle: Bottle, using engine: Engine) -> Set<Int32> {
-        let bottleProcesses = processIDsReportedByLSOF(["-t", "+D", bottle.path])
-        guard !bottleProcesses.isEmpty else { return [] }
-        let wineserver = engine.executableURL
-            .deletingLastPathComponent()
-            .appending(path: "wineserver")
-        let engineProcesses = processIDsReportedByLSOF(["-t", engine.executableURL.path])
-            .union(processIDsReportedByLSOF(["-t", wineserver.path]))
-        return bottleProcesses.intersection(engineProcesses)
+        Set(bottleProcessIdentities(in: bottle, using: engine).map(\.pid))
     }
 
-    private static func processIDsReportedByLSOF(_ arguments: [String]) -> Set<Int32> {
-        let lsof = URL(fileURLWithPath: "/usr/sbin/lsof")
-        guard FileManager.default.isExecutableFile(atPath: lsof.path) else { return [] }
-        let process = Process()
-        let output = Pipe()
-        process.executableURL = lsof
-        process.arguments = arguments
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            guard waitForProcess(process, timeout: 5) else { return [] }
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            guard let text = String(data: data, encoding: .utf8) else { return [] }
-            let ownPID = Int32(ProcessInfo.processInfo.processIdentifier)
-            return Set(text
-                .split(whereSeparator: \.isNewline)
-                .compactMap { Int32($0.trimmingCharacters(in: .whitespaces)) }
-                .filter { $0 > 1 && $0 != ownPID })
-        } catch {
-            return []
-        }
+    static func bottleProcessIdentities(in bottle: Bottle, using engine: Engine) -> Set<WineProcessIdentity> {
+        let owned = WineProcessLedger.shared.identities(in: bottle, using: engine)
+        return owned
     }
 
-    private static func signalBottleProcesses(_ processIDs: Set<Int32>, signal: Int32) {
-        for processID in processIDs {
-            Darwin.kill(processID, signal)
+    static func checkForUnownedExitingWine() throws {
+        let unknown = WineProcessLedger.unownedExitingWinePIDs()
+        if !unknown.isEmpty { throw LaunchError.unownedWineStillExiting(unknown) }
+    }
+
+    private static func signalBottleProcesses(_ processes: Set<WineProcessIdentity>, signal: Int32) {
+        for process in processes where process.isCurrent {
+            Darwin.kill(process.pid, signal)
         }
     }
 
     private static func waitUntilBottleProcessesExit(
-        in bottle: Bottle,
-        using engine: Engine,
+        _ processes: Set<WineProcessIdentity>,
         timeout: TimeInterval
     ) {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            guard !bottleProcessIDs(in: bottle, using: engine).isEmpty else { return }
+            guard processes.contains(where: \.isCurrent) else { return }
             Thread.sleep(forTimeInterval: 0.1)
         }
     }
@@ -1142,7 +1618,12 @@ enum Launcher {
         case steamMissing
         case steamMissingAfterInstall
         case steamUIFailedToStart
+        case cyberpunkMissing
+        case cyberpunkFailedToStart
         case bottleShutdownFailed([Int32])
+        case unownedWineStillExiting([Int32])
+        case bottleShutdownCancelled
+        case processInspectionFailed
         case engineCouldNotOpen
         case installerFailed(Int32)
         case displayConfigurationFailed(Int32)
@@ -1161,8 +1642,18 @@ enum Launcher {
                 "The Steam installer finished, but Steam was not found. Try Install Windows Steam again."
             case .steamUIFailedToStart:
                 "Steam started, but its interface did not open within 30 seconds. Other Windows apps were left running. Check the bottle’s Steam add-ons or use Fix Black Steam Window."
+            case .cyberpunkMissing:
+                "Cyberpunk 2077 is not installed in this Steam bottle."
+            case .cyberpunkFailedToStart:
+                "Steam received the Cyberpunk 2077 launch request, but the game process did not appear within two minutes. Steam and other Windows apps were left running."
             case .bottleShutdownFailed(let processIDs):
-                "Mac Wine Launcher could not stop Wine processes: \(processIDs.map(String.init).joined(separator: ", ")). Restart the Mac before launching this bottle again."
+                "Wine processes still have not exited after shutdown and force termination: \(processIDs.map(String.init).joined(separator: ", ")). If they are stuck in graphics-driver cleanup, signals cannot release their GPU resources. Save your work and restart the Mac before launching this bottle again."
+            case .unownedWineStillExiting(let processIDs):
+                "This bottle’s identified processes have stopped, but older Wine processes are still trying to exit: \(processIDs.map(String.init).joined(separator: ", ")). Their bottle could not be verified, so they were left untouched. They may retain graphics resources. Save your work and restart the Mac to complete cleanup."
+            case .bottleShutdownCancelled:
+                "A Windows app declined shutdown. Save and close it normally, then try Stop Steam & Wine again."
+            case .processInspectionFailed:
+                "macOS process information could not be read, so Wine cleanup could not be verified. No unidentified processes were terminated."
             case .engineCouldNotOpen: "The compatibility engine could not be opened."
             case .installerFailed(let status): "The Steam installer exited with status \(status)."
             case .displayConfigurationFailed(let status):

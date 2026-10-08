@@ -244,6 +244,263 @@ import Testing
 
     #expect(environment["WINEDLLOVERRIDES"] == "mscoree=;mshtml=;dwmapi=b")
     #expect(environment["KEEP_ME"] == "yes")
+    #expect(environment["QT_QUICK_BACKEND"] == "software")
+    #expect(environment["QT_OPENGL"] == "software")
+    #expect(environment["QTWEBENGINE_DISABLE_SANDBOX"] == "1")
+    #expect(environment["QTWEBENGINE_CHROMIUM_FLAGS"]?.contains("--disable-gpu") == true)
+}
+
+@Test func cyberpunkSteamLaunchSkipsTheBrokenLauncher() {
+    #expect(Launcher.cyberpunkSteamAppID == "1091500")
+    #expect(Launcher.steamGameArguments(
+        appID: Launcher.cyberpunkSteamAppID,
+        additionalArguments: Launcher.cyberpunkLaunchArguments
+    ) == ["-applaunch", "1091500", "--launcher-skip"])
+}
+
+@Test func baldursGate3UsesItsOfficialLauncherSkipOption() {
+    #expect(Launcher.baldursGate3SteamAppID == "1086940")
+    #expect(Launcher.baldursGate3LauncherSkipOption == "--skip-launcher")
+}
+
+@Test func baldursGate3DetectionRequiresTheGameExecutable() throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let bottle = Bottle(name: "Test", path: root.path, engine: .managedWine)
+    let executable = Launcher.baldursGate3ExecutableURL(in: bottle)
+    try FileManager.default.createDirectory(
+        at: executable.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+
+    #expect(!Launcher.isBaldursGate3Installed(in: bottle))
+    try Data("game".utf8).write(to: executable)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: executable.path
+    )
+    #expect(Launcher.isBaldursGate3Installed(in: bottle))
+}
+
+@Test func baldursGate3LauncherFixPreservesExistingSteamOptions() throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let bottle = Bottle(name: "Test", path: root.path, engine: .managedWine)
+    let executable = Launcher.baldursGate3ExecutableURL(in: bottle)
+    try FileManager.default.createDirectory(
+        at: executable.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    try Data("game".utf8).write(to: executable)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: executable.path
+    )
+    let config = Launcher.steamExecutableURL(in: bottle)
+        .deletingLastPathComponent()
+        .appending(path: "userdata/123/config/localconfig.vdf")
+    try FileManager.default.createDirectory(
+        at: config.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    let original = """
+    "UserLocalConfigStore"
+    {
+        "Software"
+        {
+            "Valve"
+            {
+                "Steam"
+                {
+                    "apps"
+                    {
+                        "1086940"
+                        {
+                            "LaunchOptions"     "--modded"
+                        }
+                    }
+                }
+            }
+        }
+    }
+    """
+    try original.write(to: config, atomically: true, encoding: .utf8)
+
+    try Launcher.ensureSteamLaunchOption(
+        in: bottle,
+        appID: Launcher.baldursGate3SteamAppID,
+        requiredOption: Launcher.baldursGate3LauncherSkipOption
+    )
+
+    let patched = try String(contentsOf: config, encoding: .utf8)
+    #expect(patched.contains("--modded --skip-launcher"))
+    try Launcher.ensureSteamLaunchOption(
+        in: bottle,
+        appID: Launcher.baldursGate3SteamAppID,
+        requiredOption: Launcher.baldursGate3LauncherSkipOption
+    )
+    #expect(try String(contentsOf: config, encoding: .utf8) == patched)
+}
+
+@Test func cyberpunkLauncherSkipIsAddedToAnExistingSteamGameEntry() {
+    let original = """
+    "UserLocalConfigStore"
+    {
+        "Software"
+        {
+            "Valve"
+            {
+                "Steam"
+                {
+                    "apps"
+                    {
+                        "1091500"
+                        {
+                            "LastPlayed"        "123"
+                            "LaunchOptions"     "--modded"
+                        }
+                    }
+                }
+            }
+        }
+    }
+    """
+
+    let patched = Launcher.patchSteamLaunchOption(
+        in: original,
+        appID: "1091500",
+        requiredOption: "--launcher-skip"
+    )
+
+    #expect(patched.contains("\"LaunchOptions\"\t\t\"--modded --launcher-skip\""))
+    #expect(Launcher.patchSteamLaunchOption(
+        in: patched,
+        appID: "1091500",
+        requiredOption: "--launcher-skip"
+    ) == patched)
+}
+
+@Test func cyberpunkLauncherSkipCreatesTheSteamGameEntryWhenMissing() {
+    let original = """
+    "UserLocalConfigStore"
+    {
+        "apps"
+        {
+            "480"
+            {
+                "LastPlayed"        "123"
+            }
+        }
+    }
+    """
+
+    let patched = Launcher.patchSteamLaunchOption(
+        in: original,
+        appID: "1091500",
+        requiredOption: "--launcher-skip"
+    )
+
+    #expect(patched.contains("\"1091500\""))
+    #expect(patched.contains("\"LaunchOptions\"\t\t\"--launcher-skip\""))
+    #expect(patched.contains("\"480\""))
+}
+
+@Test func cyberpunkDetectionRequiresTheGameExecutable() throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let bottle = Bottle(name: "Test", path: root.path, engine: .managedWine)
+    let executable = Launcher.cyberpunkExecutableURL(in: bottle)
+    try FileManager.default.createDirectory(
+        at: executable.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    #expect(!Launcher.isCyberpunkInstalled(in: bottle))
+    try Data("game".utf8).write(to: executable)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: executable.path
+    )
+    #expect(Launcher.isCyberpunkInstalled(in: bottle))
+}
+
+@Test func marvelRivalsDriverWarningFixPreservesExistingEngineSettings() {
+    let original = """
+    [/Script/Engine.RendererSettings]
+    r.VSync=1
+
+    [ConsoleVariables]
+    r.WarnOfBadDrivers=1
+    r.TextureStreaming=1
+    """
+
+    let patched = Launcher.patchINISetting(
+        in: original,
+        section: "ConsoleVariables",
+        key: Launcher.marvelRivalsBadDriverWarningKey,
+        value: "0"
+    )
+
+    #expect(patched.contains("r.WarnOfBadDrivers=0"))
+    #expect(patched.contains("r.VSync=1"))
+    #expect(patched.contains("r.TextureStreaming=1"))
+    #expect(Launcher.patchINISetting(
+        in: patched,
+        section: "ConsoleVariables",
+        key: Launcher.marvelRivalsBadDriverWarningKey,
+        value: "0"
+    ) == patched)
+}
+
+@Test func marvelRivalsDriverWarningFixCreatesPerUserConfigurations() throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let executable = root.appending(
+        path: "drive_c/Program Files (x86)/Steam/steamapps/common/MarvelRivals/MarvelGame/Marvel/Binaries/Win64/Marvel-Win64-Shipping.exe"
+    )
+    try FileManager.default.createDirectory(
+        at: executable.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    try Data("game".utf8).write(to: executable)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: executable.path
+    )
+    try FileManager.default.createDirectory(
+        at: root.appending(path: "drive_c/users/player"),
+        withIntermediateDirectories: true
+    )
+    let bottle = Bottle(name: "Test", path: root.path, engine: .managedWine)
+
+    #expect(Launcher.isMarvelRivalsInstalled(in: bottle))
+    try Launcher.ensureMarvelRivalsDriverWarningDisabled(in: bottle)
+
+    for platform in ["Windows", "WindowsClient"] {
+        let configuration = root.appending(
+            path: "drive_c/users/player/AppData/Local/Marvel/Saved/Config/\(platform)/Engine.ini"
+        )
+        let contents = try String(contentsOf: configuration, encoding: .utf8)
+        #expect(contents.contains("[ConsoleVariables]\nr.WarnOfBadDrivers=0"))
+        #expect(contents.contains("[SystemSettings]\nr.WarnOfBadDrivers=0"))
+    }
+}
+
+@Test func wukongDriverWarningFixIsScopedAndIdempotent() throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let config = root.appending(path: "drive_c/users/player/AppData/Local/b1/Saved/Config/Windows/Engine.ini")
+    try FileManager.default.createDirectory(at: config.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try "[Core.System]\nPaths=keep\n".write(to: config, atomically: true, encoding: .utf8)
+    let bottle = Bottle(name: "Test", path: root.path, engine: .managedWine)
+    try Launcher.ensureUnrealDriverWarningDisabled(in: bottle, gameDirectory: "b1")
+    let once = try String(contentsOf: config, encoding: .utf8)
+    #expect(once.contains("Paths=keep"))
+    #expect(once.contains("r.WarnOfBadDrivers=0"))
+    #expect(once.contains("[SystemSettings]\nr.WarnOfBadDrivers=0"))
+    try Launcher.ensureUnrealDriverWarningDisabled(in: bottle, gameDirectory: "b1")
+    #expect(try String(contentsOf: config, encoding: .utf8) == once)
+    try Launcher.ensureUnrealDriverWarningDisabled(in: bottle, gameDirectory: "OtherGame")
+    #expect(!FileManager.default.fileExists(atPath: root.appending(path: "drive_c/users/player/AppData/Local/OtherGame").path))
 }
 
 @Test func bottleShutdownForceStopsAProcessThatIgnoresTermination() throws {
@@ -405,6 +662,46 @@ private func peStub(machine: UInt16, marker: UInt8 = 0) -> Data {
     #expect(environment["WINEDLLPATH_PREPEND"]?.contains("/renderer/d3dmetal/wine") == true)
     #expect(environment["CX_D3DMETALPATH"]?.contains("/renderer/d3dmetal/external") == true)
     #expect(environment["CX_APPLEGPTK_LIBD3DSHARED_PATH"] == shared.path)
+}
+
+@Test func gamingEnvironmentDisablesRendererDiagnosticsWithoutChangingUserSettings() {
+    let environment = Launcher.optimizedGamingEnvironment(
+        baseEnvironment: [
+            "KEEP_ME": "yes",
+            "DXVK_CONFIG": "dxgi.maxFrameLatency = 1",
+            "VKD3D_CONFIG": "force_static_cbv"
+        ]
+    )
+
+    #expect(environment["DXVK_LOG_LEVEL"] == "none")
+    #expect(environment["DXVK_LOG_PATH"] == "none")
+    #expect(environment["DXMT_LOG_LEVEL"] == "none")
+    #expect(environment["VKD3D_DEBUG"] == "none")
+    #expect(environment["VKD3D_SHADER_DEBUG"] == "none")
+    #expect(environment["DXVK_CONFIG"] == "dxgi.maxFrameLatency = 1")
+    #expect(environment["VKD3D_CONFIG"] == "force_static_cbv")
+    #expect(environment["KEEP_ME"] == "yes")
+}
+
+@Test func everyWineEngineReceivesNoOverheadGamingEnvironment() {
+    let engine = Engine(
+        kind: .wine,
+        executableURL: URL(fileURLWithPath: "/usr/local/bin/wine")
+    )
+    let bottle = Bottle(name: "Test", path: "/Bottle", engine: .wine)
+    let environment = Launcher.configuredEnvironment(
+        engine: engine,
+        bottle: bottle,
+        baseEnvironment: [:]
+    )
+
+    #expect(environment["WINEPREFIX"] == "/Bottle")
+    #expect(environment["WINEDEBUG"] == "-all")
+    #expect(environment["DXVK_LOG_LEVEL"] == "none")
+    #expect(environment["DXVK_LOG_PATH"] == "none")
+    #expect(environment["DXMT_LOG_LEVEL"] == "none")
+    #expect(environment["VKD3D_DEBUG"] == "none")
+    #expect(environment["VKD3D_SHADER_DEBUG"] == "none")
 }
 
 @Test func retinaDisplayProfileWritesWineRegistrySettings() {

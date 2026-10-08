@@ -245,8 +245,8 @@ enum DisplayProfile: String, Codable, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .standard: "Standard — fastest"
-        case .retinaRecommended: "Retina — recommended"
+        case .standard: "Match screen — recommended"
+        case .retinaRecommended: "Retina — higher resolution (optional)"
         case .retinaCompact: "Retina — smaller UI"
         }
     }
