@@ -1,7 +1,7 @@
 # Native interface validation
 
 Validated locally on 2026-10-08, macOS 26.5.2 with 24 GB memory. This is the
-unreleased 0.6.10/build 29 interface update, based on the 0.6.9 release.
+0.6.10/build 29 interface update, based on the 0.6.9 release.
 
 ## Functionality retained
 
@@ -60,5 +60,6 @@ This was an interface update, not another gameplay/performance tuning pass. No
 full Wukong playthrough, FPS comparison, fresh runtime download, Steam reinstall,
 destructive uninstall, Intel execution, or older-macOS UI run was performed.
 Keeping the engine and game-launch code unchanged does not prove every game runs
-without regressions. The public release assets have not been replaced or released
-as part of this local update.
+without regressions. This report records local interface validation; release
+packaging, downloaded-asset checks, and CI results are recorded separately in the
+GitHub release notes.

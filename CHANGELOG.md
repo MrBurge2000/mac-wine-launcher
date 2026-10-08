@@ -4,12 +4,19 @@ All notable changes to Mac Wine Launcher are recorded here.
 
 ## [Unreleased]
 
+## [0.6.10] - 2026-10-08
+
 - Reorganize the native interface into Apps, Graphics & Display,
   Troubleshooting and Bottle, preserving launch actions and saved preferences.
 - Make Steam launch the primary action, keep Windows apps and recent launches
   together, and show installation/cleanup feedback across bottle sections.
 - Widen the bottle sidebar, simplify runtime/renderer labels, and keep paths
   readable without crowding the launch screen. No new animation or polling.
+- Keep navigation and feedback within the window during launch/cleanup, and
+  reset scrolling when switching sections.
+- Retain the 0.6.9 Wine/runtime/game-fix implementations. Validated with 64
+  automated checks and real Steam launch/shutdown checks; no new full-game or
+  FPS benchmark is claimed.
 
 ## [0.6.9] - 2026-10-08
 
